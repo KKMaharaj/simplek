@@ -1,0 +1,682 @@
+code,code_type,digit_level,description,is_active
+99,SAC,2,All Services,True
+9954,SAC,4,Construction services,True
+995411,SAC,6,Construction services of single dwelling or multi dwelling or multi-storied residential buildings,True
+995412,SAC,6,"Construction services of other residential buildings such as old age homes, homeless shelters, hostels and the like",True
+995413,SAC,6,"Construction services of industrial buildings such as buildings used for production activities (used for assembly line activities), workshops, storage buildings and other similar industrial buildings",True
+995414,SAC,6,"Construction services of commercial buildings such as office buildings, exhibition and marriage halls, malls, hotels, restaurants, airports, rail or road terminals, parking garages, petrol and service stations, theatres and other similar buildings",True
+995415,SAC,6,"Construction services of other non-residential buildings such as educational institutions, hospitals, clinics including veterinary clinics, religious establishments, courts, prisons, museums and other similar buildings",True
+995416,SAC,6,Construction services of other buildings nowhere else classified,True
+995417,SAC,6,"(i) Construction services of commercial buildings such as office buildings, exhibition and marriage halls, malls, hotels, restaurants, airports, rail or road terminals, parking garages, petrol and service stations, theatres and other similar buildings (i...",True
+995418,SAC,6,"Services by way of house-keeping, such as plumbing, carpentering, etc. where the person supplying such service through electronic commerce operator is not liable for registration under sub-section (1) of section 22 of the Central Goods and Services Tax A...",True
+995419,SAC,6,"Services involving repair, alterations, additions, replacements, renovation, maintenance or remodeling of the buildings covered above",True
+995421,SAC,6,"General construction services of highways, streets, roads, railways and airfield runways, bridges and tunnels",True
+995422,SAC,6,"General construction services of harbours, waterways, dams, water mains and lines, irrigation and other waterworks",True
+995423,SAC,6,"General construction services of long-distance underground/ overland/ submarine pipelines, communication and electric power lines (cables); pumping stations and related works; transformer stations and related works",True
+995424,SAC,6,"General construction services of local water and sewage pipelines, electricity and communication cables and related works",True
+995425,SAC,6,General construction services of mines and industrial plants,True
+995426,SAC,6,General Construction services of Power Plants and its related infrastructure,True
+995427,SAC,6,General construction services of outdoor sport and recreation facilities,True
+995428,SAC,6,General construction services of other civil engineering works nowhere else classified,True
+995429,SAC,6,"Services involving repair, alterations, additions, replacements, renovation, maintenance or remodeling of the constructions covered above",True
+995431,SAC,6,Demolition services,True
+995432,SAC,6,"Site formation and clearance services including preparation services to make sites ready for subsequent construction work, test drilling and boring and core extraction, digging of trenches",True
+995433,SAC,6,Excavating and earthmoving services,True
+995434,SAC,6,Water well drilling services and septic system installation services,True
+995435,SAC,6,Other site preparation services nowhere else classified,True
+995439,SAC,6,"Services involving repair, alterations, additions, replacements, maintenance of the constructions covered above",True
+995441,SAC,6,"Installation, assembly and erection services of prefabricated buildings",True
+995442,SAC,6,"Installation, assembly and erection services of other prefabricated structures and constructions",True
+995443,SAC,6,"Installation services of all types of street furniture (such as bus shelters, benches, telephone booths, public toilets, and the like)",True
+995444,SAC,6,Other assembly and erection services nowhere else classified,True
+995449,SAC,6,"Services involving repair, alterations, additions, replacements, maintenance of the constructions covered above",True
+995451,SAC,6,Pile driving and foundation services,True
+995452,SAC,6,Building framing and roof framing services,True
+995453,SAC,6,Roofing and waterproofing services,True
+995454,SAC,6,Concrete services,True
+995455,SAC,6,Structural steel erection services,True
+995456,SAC,6,Masonry services,True
+995457,SAC,6,Scaffolding services,True
+995458,SAC,6,Other special trade construction services nowhere else classified,True
+995459,SAC,6,"Services involving repair, alterations, additions, replacements, maintenance of the constructions covered above",True
+995461,SAC,6,"Electrical installation services including Electrical wiring and fitting services, fire alarm installation services, burglar alarm system installation services",True
+995462,SAC,6,Water plumbing and drain laying services,True
+995463,SAC,6,"Heating, ventilation and air conditioning equipment installation services",True
+995464,SAC,6,Gas fitting installation services,True
+995465,SAC,6,Insulation services,True
+995466,SAC,6,Lift and escalator installation services,True
+995468,SAC,6,Other installation services nowhere else classified,True
+995469,SAC,6,"Services involving repair, alterations, additions, replacements, maintenance of the installations covered above",True
+995471,SAC,6,Glazing services,True
+995472,SAC,6,Plastering services,True
+995473,SAC,6,Painting services,True
+995474,SAC,6,Floor and wall tiling services,True
+995475,SAC,6,"Other floor laying, wall covering and wall papering services",True
+995476,SAC,6,Joinery and carpentry services,True
+995477,SAC,6,Fencing and railing services,True
+995478,SAC,6,Other building completion and finishing services nowhere else classified,True
+995479,SAC,6,"Services involving repair, alterations, additions, replacements, maintenance of the completion/finishing works covered above",True
+9961,SAC,4,Services in wholesale trade,True
+996111,SAC,6,Services provided for a fee or commission or on contract basis on wholesale trade,True
+9962,SAC,4,Services in retail trade,True
+996211,SAC,6,Services provided for a fee or commission or on contract basis on retail trade,True
+9963,SAC,4,"Accommodation, food and beverage services",True
+996311,SAC,6,"Room or unit accommodation services provided by Hotels, Inn, Guest House, Club and the like",True
+996312,SAC,6,Camp site services,True
+996313,SAC,6,Recreational and vacation camp services,True
+996321,SAC,6,Room or unit accommodation services for students in student residences,True
+996322,SAC,6,"Room or unit accommodation services provided by Hostels, Camps, Paying Guest and the like",True
+996329,SAC,6,Other room or unit accommodation services nowhere else classified,True
+996331,SAC,6,"Services provided by restaurants, cafes and similar eating facilities including takeaway services, room services and door delivery of food",True
+996332,SAC,6,"Services provided by Hotels, Inn, Guest House, Club and the like including room services, takeaway services and door delivery of food",True
+996333,SAC,6,Services provided in canteen and other similar establishments,True
+996334,SAC,6,"Catering Services in exhibition halls, events, marriage halls and other outdoor/indoor functions",True
+996335,SAC,6,"Catering services in trains, flights and the like",True
+996336,SAC,6,"Preparation or supply services of food, edible preparations, alcoholic and non-alcoholic beverages to airlines and other transportation operators",True
+996337,SAC,6,Other contract food services,True
+996339,SAC,6,"Other food, edible preparations, alcoholic and non-alcoholic beverages serving services nowhere else classified",True
+9964,SAC,4,Passenger transport services,True
+996411,SAC,6,"Local land transport services of passengers by railways, metro, monorail, bus, tramway, autos, three wheelers, scooters and other motor vehicles",True
+996412,SAC,6,Taxi services including radio taxi and other similar services,True
+996413,SAC,6,Non-scheduled local bus and coach charter services,True
+996414,SAC,6,Other land transportation services of passengers,True
+996415,SAC,6,"Local water transport services of passengers by ferries, cruises and the like",True
+996416,SAC,6,"Sightseeing transportation services by rail, land, water and air",True
+996417,SAC,6,Transport services of passengers by ropeways,True
+996418,SAC,6,Sightseeing transportation services by rail or road,True
+996419,SAC,6,Other local transportation services of passengers nowhere else classified,True
+996421,SAC,6,"Long-distance transport services of passengers through rail network by railways, metro and the like",True
+996422,SAC,6,"Long-distance transport services of passengers through road by bus, car, non-scheduled long distance bus and coach services, stage carriage and the like",True
+996423,SAC,6,Taxi services including radio taxi and other similar services,True
+996424,SAC,6,"Coastal and transoceanic (overseas) water transport services of passengers by Ferries, Cruise Ships and the like",True
+996425,SAC,6,Domestic/ international scheduled air transport services of passengers,True
+996426,SAC,6,Domestic/ international non-scheduled air transport services of passengers,True
+996427,SAC,6,Space transport services of passengers,True
+996429,SAC,6,Other long-distance transportation services of passengers nowhere else classified,True
+996431,SAC,6,Long-distance transport service of passengers through rail network by railways,True
+996432,SAC,6,"Scheduled long-distance transport services of passengers through road by bus and coach services including stage carriage, contract carriage and the like",True
+996433,SAC,6,"Non-scheduled long-distance transport services of passengers through road by bus and coach services including stage carriage, contract carriage and the like",True
+996434,SAC,6,"Long-distance transport service of passengers by any motor vehicle other than bus including motorcab, maxicab  and radio taxi",True
+996439,SAC,6,Other long distance transport service of passengers by land nowhere else specified,True
+996441,SAC,6,Coastal water transport service of passengers by ferries and the like,True
+996442,SAC,6,Coastal  water transport service of passengers by cruise ships and the like,True
+996443,SAC,6,Inland water transport service of passengers by ferries and the like,True
+996444,SAC,6,Inland water transport service of passengers by cruise ships and the like,True
+996445,SAC,6,"International water transport services of passengers by ferries, cruise ships and the like",True
+996449,SAC,6,Other long distance transport service of passengers by water nowhere else specified,True
+996451,SAC,6,Domestic scheduled air transport service of passengers in economy class,True
+996452,SAC,6,Domestic scheduled air transport service of passengers in other than economy class,True
+996453,SAC,6,Domestic non-scheduled air transport service of passengers,True
+996454,SAC,6,International scheduled air transport service of passengers in economy class,True
+996455,SAC,6,International scheduled air transport service of passengers in other than economy class,True
+996456,SAC,6,International non-scheduled air transport service of passengers,True
+996459,SAC,6,Other long-distance transportation service of passengers by air nowhere else specified including space transport service of passengers,True
+9965,SAC,4,Goods Transport Services,True
+996511,SAC,6,"Road transport services of Goods including letters, parcels, live animals, household and office furniture, containers and the like by refrigerator vehicles, trucks, trailers, man or animal drawn vehicles or any other vehicles",True
+996512,SAC,6,"Railway transport services of Goods including letters, parcels, live animals, household and office furniture, intermodal containers, bulk cargo and the like",True
+996513,SAC,6,"Transport services of petroleum and natural gas, water, sewerage and other goods via pipeline",True
+996514,SAC,6,"Transport services via pipeline of other chemicals, coal slurry and of other goods",True
+996515,SAC,6,"Moving services of household goods, office equipment and furniture",True
+996516,SAC,6,"Road transport services of goods including letters, parcels, live animals, containers and the like in referigerated vehicles, trucks, trailers or any other motor vehicle or in man or animal driven vehicles by any person other than a goods transport agency",True
+996517,SAC,6,"Railway transport services of goods including letters, parcels, live animals, household and office furniture, intermodal containers, bulk cargo and the like by  Container Transport Operators (CTOs) other than Railways",True
+996518,SAC,6,Transport of goods by ropeways,True
+996519,SAC,6,Other land transport services of goods nowhere else classified,True
+996521,SAC,6,"Coastal and transoceanic (overseas) water transport services of goods by refrigerator vessels, tankers, bulk cargo vessels, container ships and the like",True
+996522,SAC,6,"Inland water transport services of goods by refrigerator vessels, tankers and other vessels",True
+996523,SAC,6,"International water transport services of goods by refrigerated vessels,  tankers, bulk cargo vessels, container ships and the like",True
+996531,SAC,6,Air transport services of letters and parcels and other goods,True
+996532,SAC,6,Space transport services of freight,True
+996540,SAC,6,Multimodal Transport of goods from a place in India to another place in India,True
+9966,SAC,4,Rental services of transport vehicles with operators,True
+996601,SAC,6,"Rental services of road vehicles including buses, coaches, cars, trucks and other motor vehicles, operator",True
+996602,SAC,6,"Rental services of water vessels including passenger vessels, freight vessels and the like operator",True
+996603,SAC,6,"Rental services of aircraft including passenger aircrafts, freight aircrafts and the like operator",True
+996604,SAC,6,Rental services of passenger vessels  with operator,True
+996605,SAC,6,Rental services of goods vessels with operator,True
+996606,SAC,6,Rental service of passenger aircraft with operator,True
+996607,SAC,6,Rental service of goods aircraft with operator,True
+996609,SAC,6,Rental services of other transport vehicles nowhere else classified operator,True
+9967,SAC,4,Supporting services in transport,True
+996711,SAC,6,Container handling services,True
+996712,SAC,6,Customs House Agent services,True
+996713,SAC,6,Clearing and forwarding services,True
+996719,SAC,6,Other cargo and baggage handling services,True
+996721,SAC,6,Refrigerated storage services,True
+996722,SAC,6,Bulk liquid or gas storage services,True
+996729,SAC,6,Other storage and warehousing services,True
+996731,SAC,6,Railway pushing or towing services,True
+996739,SAC,6,Other supporting services for railway transport nowhere else classified,True
+996741,SAC,6,Bus station services,True
+996742,SAC,6,"Operation services of national highways, state highways, expressways, roads and streets; bridges and tunnel operation services",True
+996743,SAC,6,Parking lot services,True
+996744,SAC,6,Towing services for commercial and private vehicles,True
+996749,SAC,6,Other supporting services for road transport nowhere else classified,True
+996751,SAC,6,"Port and waterway operation services (excluding cargo handling) such as operation services of ports, docks, light houses, light ships and the like",True
+996752,SAC,6,Pilotage and berthing services,True
+996753,SAC,6,Vessel salvage and refloating services,True
+996754,SAC,6,"Maintenance, repair or overhaul services in respect of ships and other vessels, their engines and other components or parts",True
+996759,SAC,6,Other supporting services for water transport nowhere else classified,True
+996761,SAC,6,Airport operation services (excluding cargo handling),True
+996762,SAC,6,Air traffic control services,True
+996763,SAC,6,Other supporting services for air transport,True
+996764,SAC,6,Supporting services for space transport,True
+996768,SAC,6,Other supporting services for air transport,True
+996769,SAC,6,Supporting services for space transport,True
+996791,SAC,6,Goods transport agency services for road transport,True
+996792,SAC,6,Goods transport agency services for other modes of transport,True
+996793,SAC,6,Other goods transport services,True
+996799,SAC,6,Other supporting transport services nowhere else classified,True
+9968,SAC,4,Postal and courier services,True
+996811,SAC,6,"Postal services including post office counter services, mail box rental services",True
+996812,SAC,6,Courier services,True
+996813,SAC,6,Local delivery services,True
+996819,SAC,6,Other Delivery Services nowhere else classified,True
+9969,SAC,4,"Electricity, gas, water and other distribution services",True
+996911,SAC,6,Electricity transmission services,True
+996912,SAC,6,Electricity distribution services,True
+996913,SAC,6,Gas distribution services,True
+996921,SAC,6,Water distribution services,True
+996922,SAC,6,"Services involving distribution of steam, hot water and air conditioning supply and the like",True
+996929,SAC,6,Other similar services,True
+9971,SAC,4,Financial and related services,True
+997111,SAC,6,Central banking services,True
+997112,SAC,6,Deposit services,True
+997113,SAC,6,"Credit-granting services including stand-by commitment, guarantees and securities",True
+997114,SAC,6,Financial leasing services,True
+997115,SAC,6,"Transfer of the right to use any goods for any purpose (whether or not for a specified period) for cash, deferred payment or other valuable consideration.",True
+997116,SAC,6,Any transfer of right in goods or of undivided share in goods without the transfer of title thereof.,True
+997119,SAC,6,"Other financial services (except investment banking, insurance services and pension services)",True
+997120,SAC,6,Investment banking services,True
+997131,SAC,6,pension services,True
+997132,SAC,6,Life insurance services  (excluding reinsurance services),True
+997133,SAC,6,Accident and health insurance services,True
+997134,SAC,6,Motor vehicle insurance services,True
+997135,SAC,6,"Marine, aviation, and other transport insurance services",True
+997136,SAC,6,Freight insurance services and travel insurance services,True
+997137,SAC,6,Other property insurance services,True
+997138,SAC,6,Freight insurance services and travel insurance services,True
+997139,SAC,6,Other non-life insurance services (excluding reinsurance services),True
+997141,SAC,6,Life reinsurance services,True
+997142,SAC,6,Accident and health reinsurance services,True
+997143,SAC,6,Motor vehicle reinsurance services,True
+997144,SAC,6,"Marine, aviation and other transport reinsurance services",True
+997145,SAC,6,Freight reinsurance services,True
+997146,SAC,6,Other property reinsurance services,True
+997147,SAC,6,Other property reinsurance services,True
+997149,SAC,6,Other non-life reinsurance services,True
+997151,SAC,6,"Services related to investment banking such as mergers and acquisition services, corporate finance and venture capital services",True
+997152,SAC,6,Brokerage and related securities and commodities services including commodity exchange services,True
+997153,SAC,6,Portfolio management services except pension funds,True
+997154,SAC,6,Trust and custody services,True
+997155,SAC,6,Services related to the administration of financial markets,True
+997156,SAC,6,Financial consultancy services,True
+997157,SAC,6,Foreign exchange services,True
+997158,SAC,6,Financial transactions processing and clearing house services,True
+997159,SAC,6,Other services auxiliary to financial services,True
+997161,SAC,6,Services auxiliary to insurance and pensions,True
+997162,SAC,6,Insurance claims adjustment services,True
+997163,SAC,6,Actuarial services,True
+997164,SAC,6,Pension fund management services,True
+997169,SAC,6,Other services auxiliary to insurance and pensions,True
+997171,SAC,6,Services of holding equity of subsidiary companies,True
+997172,SAC,6,Services of holding securities and other assets of trusts and funds and similar financial entities,True
+9972,SAC,4,Real estate services,True
+997211,SAC,6,Rental or leasing services involving own or leased residential property,True
+997212,SAC,6,Rental or leasing services involving own or leased non-residential property,True
+997213,SAC,6,Trade services of buildings,True
+997214,SAC,6,Trade services of time-share properties,True
+997215,SAC,6,Trade services of vacant and subdivided land,True
+997219,SAC,6,Other real estate services involving owned or leased property,True
+997221,SAC,6,Property management services on a fee or commission basis or on contract basis,True
+997222,SAC,6,Building sales on a fee or commission basis or on contract basis,True
+997223,SAC,6,Land sales on a fee or commission basis or on contract basis,True
+997224,SAC,6,Real estate appraisal services on a fee or commission basis or on contract basis,True
+997229,SAC,6,Other real estate services on a fee or commission basis or on contract basis,True
+997231,SAC,6,"Services by way of grant of development rights, FSI or additional FSI",True
+9973,SAC,4,Leasing or rental services without operator,True
+997311,SAC,6,"Leasing or rental services concerning transport equipments including containers, without operator",True
+997312,SAC,6,Leasing or rental services concerning agricultural machinery and equipment without operator,True
+997313,SAC,6,Leasing or rental services concerning construction machinery and equipment without operator,True
+997314,SAC,6,Leasing or rental services concerning office machinery and equipment (except computers) without operator,True
+997315,SAC,6,Leasing or rental services concerning computers without operators,True
+997316,SAC,6,Leasing or rental services concerning telecommunications equipment without operator,True
+997317,SAC,6,Leasing or rental services concerning other machinery and equipment without operator,True
+997318,SAC,6,"Transfer of the right to use any goods for any purpose (whether or not for a specified period) for cash, deferred payment or other valuable consideration.",True
+997319,SAC,6,Leasing or rental services concerning other machinery and equipments without operator,True
+997321,SAC,6,"Leasing or rental services concerning televisions, radios, video cassette recorders, projectors, audio systems and related equipment and accessories (home entertainment equipment )",True
+997322,SAC,6,Leasing or rental services concerning video tapes and disks (home entertainment equipment ),True
+997323,SAC,6,Leasing or rental services concerning furniture and other household appliances,True
+997324,SAC,6,Leasing or rental services concerning pleasure and leisure equipment,True
+997325,SAC,6,Leasing or rental services concerning household linen,True
+997326,SAC,6,"Leasing or rental services concerning textiles, clothing and footwear",True
+997327,SAC,6,Leasing or rental services concerning do-it-yourself machinery and equipment,True
+997328,SAC,6,"Transfer of the right to use any goods for any purpose (whether or not for a specified period) for cash, deferred payment or other valuable consideration.",True
+997329,SAC,6,Leasing or rental services concerning other goods,True
+997331,SAC,6,Licensing services for the right to use computer software and databases,True
+997332,SAC,6,"Licensing services for the right to broadcast and show original films, sound recordings, radio and television programme and the like",True
+997333,SAC,6,Licensing services for the right to reproduce original art works,True
+997334,SAC,6,"Licensing services for the right to reprint and copy manuscripts, books, journals and periodicals",True
+997335,SAC,6,Licensing services for the right to use research and development  products,True
+997336,SAC,6,Licensing services for the right to use trademarks and franchises,True
+997337,SAC,6,Licensing services for the right to use minerals including its exploration and evaluation,True
+997338,SAC,6,Licensing services for right to use other natural resources including telecommunication spectrum,True
+997339,SAC,6,Licensing services for the right to use other intellectual property products and other resources nowhere else classified,True
+9981,SAC,4,Research and development services,True
+998111,SAC,6,Research and experimental development services in natural sciences,True
+998112,SAC,6,Research and experimental development services in engineering and technology,True
+998113,SAC,6,Research and experimental development services in medical sciences and pharmacy,True
+998114,SAC,6,Research and experimental development services in agricultural sciences,True
+998121,SAC,6,Research and experimental development services in social sciences,True
+998122,SAC,6,Research and experimental development services in humanities,True
+998130,SAC,6,Interdisciplinary research and experimental development services,True
+998141,SAC,6,Research and development originals in pharmaceuticals,True
+998142,SAC,6,Research and development originals in agriculture,True
+998143,SAC,6,Research and development originals in biotechnology,True
+998144,SAC,6,Research and development originals in computer related sciences,True
+998145,SAC,6,Research and development originals in other fields nowhere else classified,True
+998149,SAC,6,Research and development originals in other fields nowhere else classified,True
+9982,SAC,4,Legal and accounting services,True
+998211,SAC,6,Legal advisory and representation services concerning criminal law,True
+998212,SAC,6,Legal advisory and representation services concerning other fields of law,True
+998213,SAC,6,"Legal documentation and certification services concerning patents, copyrights and other intellectual property rights",True
+998214,SAC,6,Legal documentation and certification services concerning other documents,True
+998215,SAC,6,Arbitration and conciliation services,True
+998216,SAC,6,Other legal services nowhere else classified,True
+998219,SAC,6,Other legal services nowhere else classified,True
+998221,SAC,6,Financial auditing services,True
+998222,SAC,6,Accounting and bookkeeping services,True
+998223,SAC,6,Payroll services,True
+998224,SAC,6,Other similar services nowhere else classified,True
+998229,SAC,6,Other similar services nowhere else classified,True
+998231,SAC,6,Corporate tax consulting and preparation services,True
+998232,SAC,6,Individual tax preparation and planning services,True
+998239,SAC,6,Other tax consultancy and preparation services,True
+998240,SAC,6,Insolvency and receivership services,True
+9983,SAC,4,"Other professional, technical and business services",True
+998311,SAC,6,"Management consulting and management services including financial, strategic, human resources, marketing, operations and supply chain management",True
+998312,SAC,6,Business consulting services including public relations services,True
+998313,SAC,6,Information technology consulting and support services,True
+998314,SAC,6,Information technology design and development services,True
+998315,SAC,6,Hosting and information technology infrastructure provisioning services,True
+998316,SAC,6,Information technology infrastructure and network management services,True
+998319,SAC,6,Other information technology services nowhere else classified,True
+998321,SAC,6,Architectural advisory services,True
+998322,SAC,6,Architectural services for residential building projects,True
+998323,SAC,6,Architectural services for non-residential building projects,True
+998324,SAC,6,Historical restoration architectural services,True
+998325,SAC,6,Urban planning services,True
+998326,SAC,6,Rural land planning services,True
+998327,SAC,6,Project site master planning services,True
+998328,SAC,6,Landscape architectural services and advisory services,True
+998329,SAC,6,"Other architectural services, urban and land planning and landscape architectural services",True
+998331,SAC,6,Engineering advisory services,True
+998332,SAC,6,Engineering services for building projects,True
+998333,SAC,6,Engineering services for industrial and manufacturing projects,True
+998334,SAC,6,Engineering services for transportation projects,True
+998335,SAC,6,Engineering services for power projects,True
+998336,SAC,6,Engineering services for telecommunications and broadcasting projects,True
+998337,SAC,6,"Engineering services for waste management projects (hazardous and non-hazardous), for water, sewerage and drainage projects",True
+998338,SAC,6,Engineering services for other projects nowhere else classified,True
+998339,SAC,6,Project management services for construction projects,True
+998341,SAC,6,Geological and geophysical consulting services,True
+998342,SAC,6,Subsurface surveying services,True
+998343,SAC,6,Mineral exploration and evaluation,True
+998344,SAC,6,Surface surveying and map-making services,True
+998345,SAC,6,Weather forecasting and meteorological services,True
+998346,SAC,6,Technical testing and analysis services,True
+998347,SAC,6,"Certification of ships, aircraft, dams, and the like",True
+998348,SAC,6,Certification and authentication of works of art,True
+998349,SAC,6,Other technical and scientific services nowhere else classified,True
+998351,SAC,6,Veterinary services for pet animals,True
+998352,SAC,6,Veterinary services for livestock,True
+998359,SAC,6,Other veterinary services nowhere else classified,True
+998361,SAC,6,Advertising Services,True
+998362,SAC,6,"Purchase or sale of advertising space or time, on commission",True
+998363,SAC,6,Sale of advertising space in print media (except on commission),True
+998364,SAC,6,Sale of television and radio advertising time,True
+998365,SAC,6,Sale of Internet advertising space,True
+998366,SAC,6,Sale of other advertising space or time (except on commission),True
+998371,SAC,6,Market research services,True
+998372,SAC,6,Public opinion polling services,True
+998381,SAC,6,Portrait photography services,True
+998382,SAC,6,Advertising and related photography services,True
+998383,SAC,6,Event photography and event videography services,True
+998384,SAC,6,Specialty photography services,True
+998385,SAC,6,Restoration and retouching services of photography,True
+998386,SAC,6,Photographic and videographic processing services,True
+998387,SAC,6,Other photography and videography and their processing services nowhere else classified,True
+998389,SAC,6,Other photography and videography and their processing services nowhere else classified,True
+998391,SAC,6,"Specialty design services including interior design, fashion design, industrial design and other specialty design services",True
+998392,SAC,6,Design originals,True
+998393,SAC,6,Scientific and technical consulting services,True
+998394,SAC,6,Original compilations of facts or information,True
+998395,SAC,6,Translation and interpretation services,True
+998396,SAC,6,Trademarks and franchises,True
+998397,SAC,6,Sponsorship services and brand promotion services,True
+998398,SAC,6,Sponsorship services and brand promotion services,True
+998399,SAC,6,"Other professional, technical and business services nowhere else classified",True
+9984,SAC,4,"Telecommunications, broadcasting and information supply services",True
+998411,SAC,6,Carrier services,True
+998412,SAC,6,Fixed telephony services,True
+998413,SAC,6,Mobile telecommunications services,True
+998414,SAC,6,Private network services,True
+998415,SAC,6,Data transmission services,True
+998419,SAC,6,"Other telecommunications services including fax services, telex services nowhere else classified",True
+998421,SAC,6,Internet backbone services,True
+998422,SAC,6,Internet access services in wired and wireless mode,True
+998423,SAC,6,"Fax, telephony over the Internet",True
+998424,SAC,6,Audio conferencing and video conferencing over the Internet,True
+998429,SAC,6,Other internet telecommunications services nowhere else classified,True
+998431,SAC,6,"On-line text based information such as online books, newspapers, periodicals, directories and the like",True
+998432,SAC,6,On-line audio content,True
+998433,SAC,6,On-line video content,True
+998434,SAC,6,Software downloads,True
+998435,SAC,6,Supply consisting only of e-book.,True
+998439,SAC,6,Other on-line contents nowhere else classified,True
+998441,SAC,6,News agency services to newspapers and periodicals,True
+998442,SAC,6,Services of independent journalists and press photographers,True
+998443,SAC,6,News agency services to audiovisual media,True
+998451,SAC,6,Library services,True
+998452,SAC,6,Operation services of public archives including digital archives,True
+998453,SAC,6,Operation services of historical archives including digital archives,True
+998461,SAC,6,Radio broadcast originals,True
+998462,SAC,6,Television broadcast originals,True
+998463,SAC,6,Radio channel programmes,True
+998464,SAC,6,Television channel programmes,True
+998465,SAC,6,Broadcasting services,True
+998466,SAC,6,Home programme distribution services,True
+998469,SAC,6,"Other broadcasting, programming and programme distribution services",True
+9985,SAC,4,Support services,True
+998511,SAC,6,Executive or retained personnel search services,True
+998512,SAC,6,"Permanent placement services, other than executive search services",True
+998513,SAC,6,Contract staffing services,True
+998514,SAC,6,Temporary staffing services,True
+998515,SAC,6,Long-term staffing (pay rolling) services,True
+998516,SAC,6,Temporary staffing-to-permanent placement services,True
+998517,SAC,6,Co-employment staffing services,True
+998519,SAC,6,Other employment and labour supply services nowhere else classified,True
+998521,SAC,6,Investigation services,True
+998522,SAC,6,Security consulting services,True
+998523,SAC,6,Security systems services,True
+998524,SAC,6,Armoured car services,True
+998525,SAC,6,Guard services,True
+998526,SAC,6,Training of guard dogs,True
+998527,SAC,6,Polygraph services,True
+998528,SAC,6,Fingerprinting services,True
+998529,SAC,6,Other security services nowhere else classified,True
+998531,SAC,6,Disinfecting and exterminating services,True
+998532,SAC,6,Window cleaning services,True
+998533,SAC,6,General cleaning services,True
+998534,SAC,6,Specialised cleaning services for reservoirs and tanks,True
+998535,SAC,6,Sterilisation of objects or premises (operating rooms),True
+998536,SAC,6,Furnace and chimney cleaning services,True
+998537,SAC,6,Exterior cleaning of buildings of all types,True
+998538,SAC,6,Cleaning of transportation equipment,True
+998539,SAC,6,Other cleaning services nowhere else classified,True
+998540,SAC,6,Packaging services of goods for others,True
+998541,SAC,6,Parcel packing and gift wrapping,True
+998542,SAC,6,Coin and currency packing services,True
+998543,SAC,6,Coin and currency packing services,True
+998549,SAC,6,Other packaging services nowhere else classified,True
+998551,SAC,6,Reservation services for transportation,True
+998552,SAC,6,"Reservation services for accommodation, cruises and package tours",True
+998553,SAC,6,"Reservation services for convention centres, congress centres and exhibition halls",True
+998554,SAC,6,"Reservation services for event tickets, cinema halls, entertainment and recreational services and other reservation services",True
+998555,SAC,6,Tour operator services,True
+998556,SAC,6,Tourist guide services,True
+998557,SAC,6,Tourism promotion and visitor information services,True
+998559,SAC,6,Other travel arrangement and related services nowhere else classified,True
+998591,SAC,6,Credit reporting and rating services,True
+998592,SAC,6,Collection agency services,True
+998593,SAC,6,Telephone-based support services,True
+998594,SAC,6,Combined office administrative services,True
+998595,SAC,6,"Specialised office support services such as duplicating services, mailing services, document preparation and the like",True
+998596,SAC,6,"Events, Exhibitions, Conventions and trade shows organisation and assistance services",True
+998597,SAC,6,Landscape care and maintenance services,True
+998598,SAC,6,Other information services nowhere else classified,True
+998599,SAC,6,Other support services nowhere else classified,True
+9986,SAC,4,"Support services to agriculture, hunting, forestry, fishing, mining and utilities",True
+998611,SAC,6,Support services to crop production,True
+998612,SAC,6,Animal husbandry services,True
+998613,SAC,6,Support services to hunting,True
+998614,SAC,6,Support services to forestry and logging,True
+998615,SAC,6,Support services to fishing,True
+998619,SAC,6,"Other support services to agriculture, hunting, forestry and fishing",True
+998621,SAC,6,Support services to oil and gas extraction,True
+998622,SAC,6,Support services to other mining nowhere else classified,True
+998631,SAC,6,Support services to electricity transmission and distribution,True
+998632,SAC,6,Support services to gas distribution,True
+998633,SAC,6,Support services to water distribution,True
+998634,SAC,6,"Support services to Distribution services of steam, hot water and air-conditioning supply",True
+998635,SAC,6,"Other support services to electricity , gas and water distribution",True
+9987,SAC,4,"Maintenance, repair and installation (except construction) services",True
+998711,SAC,6,"Maintenance and repair services of fabricated metal products, except machinery and equipment",True
+998712,SAC,6,Maintenance and repair services of office and accounting machinery,True
+998713,SAC,6,Maintenance and repair services of computers and peripheral equipment,True
+998714,SAC,6,Maintenance and repair services of transport machinery and equipment,True
+998715,SAC,6,Maintenance and repair services of electrical household appliances,True
+998716,SAC,6,Maintenance and repair services of telecommunication equipments and apparatus,True
+998717,SAC,6,Maintenance and repair services of commercial and industrial machinery,True
+998718,SAC,6,Maintenance and repair services of elevators and escalators,True
+998719,SAC,6,Maintenance and repair services of other machinery and equipments,True
+998721,SAC,6,Repair services of footwear and leather goods,True
+998722,SAC,6,"Repair services of watches, clocks and jewellery",True
+998723,SAC,6,Repair services of garments and household textiles,True
+998724,SAC,6,Repair services of furniture,True
+998725,SAC,6,Repair services of bicycles,True
+998726,SAC,6,Maintenance and repair services of musical instruments,True
+998727,SAC,6,Repair services for photographic equipment and cameras,True
+998729,SAC,6,Maintenance and repair services of other goods nowhere else classified,True
+998731,SAC,6,"Installation services of fabricated metal products, except machinery and equipment",True
+998732,SAC,6,"Installation services of industrial, manufacturing and service industry machinery and equipment",True
+998733,SAC,6,Installation services of office and accounting machinery and computers,True
+998734,SAC,6,"Installation services of radio, television and communications equipment and apparatus",True
+998735,SAC,6,"Installation services of professional medical machinery and equipment, and precision and optical instruments",True
+998736,SAC,6,Installation services of electrical machinery and apparatus nowhere else classified,True
+998739,SAC,6,Installation services of other goods nowhere else classified,True
+9988,SAC,4,Manufacturing services on physical inputs (goods) owned by others,True
+998811,SAC,6,Meat processing services,True
+998812,SAC,6,Fish processing services,True
+998813,SAC,6,Fruit and vegetables processing services,True
+998814,SAC,6,Vegetable and animal oil and fat manufacturing services,True
+998815,SAC,6,Dairy product manufacturing services,True
+998816,SAC,6,Other food product manufacturing services,True
+998817,SAC,6,Prepared animal feeds manufacturing services,True
+998818,SAC,6,Beverage manufacturing services,True
+998819,SAC,6,Tobacco manufacturing services nowhere else classified,True
+998821,SAC,6,Textile manufacturing services,True
+998822,SAC,6,Wearing apparel manufacturing services,True
+998823,SAC,6,Leather and leather product manufacturing services,True
+998829,SAC,6,"Textile, wearing apparel and leather manufacturing services other than services by way of job work specified above.",True
+998831,SAC,6,Wood and wood product manufacturing services,True
+998832,SAC,6,Paper and paper product manufacturing services,True
+998839,SAC,6,Wood and paper manufacturing services other than services by way of job work specified above,True
+998841,SAC,6,Coke and refined petroleum product manufacturing services,True
+998842,SAC,6,Chemical product manufacturing services,True
+998843,SAC,6,Pharmaceutical product manufacturing services,True
+998849,SAC,6,"Petroleum, chemical and pharmaceutical products manufacturing services other than services by way of job work specified above",True
+998851,SAC,6,Rubber and plastic product manufacturing services,True
+998852,SAC,6,Plastic product manufacturing services,True
+998853,SAC,6,Other non-metallic mineral product manufacturing services,True
+998859,SAC,6,"Rubber, plastic and other non-metallic mineral product manufacturing services, other than services by way of job work specified above.",True
+998860,SAC,6,Basic metal manufacturing services,True
+998861,SAC,6,Services by way of job work in relation to basic metals,True
+998869,SAC,6,"Basic metal manufacturing services, other than services by way of job work specified above",True
+998871,SAC,6,"Structural metal product, tank, reservoir and steam generator manufacturing services",True
+998872,SAC,6,Weapon and ammunition manufacturing services,True
+998873,SAC,6,Other fabricated metal product manufacturing and metal treatment services,True
+998874,SAC,6,"Computer, electronic and optical product manufacturing services",True
+998875,SAC,6,Electrical equipment manufacturing services,True
+998876,SAC,6,General-purpose machinery manufacturing services nowhere else classified,True
+998877,SAC,6,Special-purpose machinery manufacturing services,True
+998879,SAC,6,"Fabricated metal product, machinery and equipment manufacturing services, other than services by way of job work specified above",True
+998881,SAC,6,Motor vehicle and trailer manufacturing services,True
+998882,SAC,6,Other transport equipment manufacturing services,True
+998883,SAC,6,Services  by way of job work in relation to bus body building,True
+998889,SAC,6,"Transport equipment manufacturing services, other than job work services specified above",True
+998891,SAC,6,Furniture manufacturing services,True
+998892,SAC,6,Jewellery manufacturing services,True
+998893,SAC,6,Imitation jewellery manufacturing services,True
+998894,SAC,6,Musical instrument manufacturing services,True
+998895,SAC,6,Sports goods manufacturing services,True
+998896,SAC,6,Game and toy manufacturing services,True
+998897,SAC,6,Medical and dental instrument and supply manufacturing services,True
+998898,SAC,6,Other manufacturing services nowhere else classified,True
+998899,SAC,6,Other manufacturing services nowhere else classified,True
+9989,SAC,4,"Other manufacturing services; publishing, printing and reproduction services; materials recovery services",True
+998911,SAC,6,"Publishing, on a fee or contract basis",True
+998912,SAC,6,"Printing and reproduction services of recorded media, on a fee or contract basis",True
+998920,SAC,6,"Moulding, pressing, stamping, extruding and similar plastic manufacturing services",True
+998931,SAC,6,Iron and steel casting services,True
+998932,SAC,6,Non-ferrous metal casting services,True
+998933,SAC,6,"Metal forging, pressing, stamping, roll forming and powder metallurgy services",True
+998941,SAC,6,"Metal waste and scrap recovery (recycling) services, on a fee or contract basis",True
+998942,SAC,6,"Non-metal waste and scrap recovery (recycling) services, on a fee or contract basis",True
+998950,SAC,6,"Other manufacturing services, publishing, printing and reproduction services, materials recovery services nowhere else classified",True
+9991,SAC,4,Public administration and other services provided to the community as a whole; compulsory social security services,True
+999111,SAC,6,Overall Government public services,True
+999112,SAC,6,"Public administrative services related to the provision of educational, health care, cultural and other social services, excluding social security service",True
+999113,SAC,6,Public administrative services related to the more efficient operation of business,True
+999119,SAC,6,Other administrative services of the government nowhere else classified,True
+999121,SAC,6,"Public administrative services related to External Affairs, Diplomatic and Consular services abroad",True
+999122,SAC,6,Services related to foreign economic aid,True
+999123,SAC,6,Services related to foreign military aid,True
+999124,SAC,6,Military defence services,True
+999125,SAC,6,Civil defence services,True
+999126,SAC,6,Police and fire protection services,True
+999127,SAC,6,Public administrative services related to law courts,True
+999128,SAC,6,Administrative services related to the detention or rehabilitation of criminals,True
+999129,SAC,6,Public administrative services related to other public order and safety affairs nowhere else classified,True
+999131,SAC,6,"Administrative services related to sickness, maternity or temporary disablement benefit schemes",True
+999132,SAC,6,"Administrative services related to government employee pension schemes; old-age disability or survivors' benefit schemes, other than for government employees",True
+999133,SAC,6,Administrative services related to unemployment compensation benefit schemes,True
+999134,SAC,6,Administrative services related to family and child allowance programmes,True
+999139,SAC,6,Other administrative services related to compulsory social security schemes,True
+9992,SAC,4,Education services,True
+999210,SAC,6,Pre-primary education services,True
+999220,SAC,6,Primary education services,True
+999231,SAC,6,"Secondary education services, general",True
+999232,SAC,6,"Secondary education services, technical and vocational",True
+999241,SAC,6,"Higher education services, general",True
+999242,SAC,6,"Higher education services, technical",True
+999243,SAC,6,"Higher education services, vocational",True
+999249,SAC,6,Other higher education services,True
+999250,SAC,6,Specialised education services,True
+999259,SAC,6,Specialised education services,True
+999291,SAC,6,Cultural education services,True
+999292,SAC,6,Sports and recreation education services,True
+999293,SAC,6,Commercial training and coaching services,True
+999294,SAC,6,Other education and training services nowhere else classified,True
+999295,SAC,6,services involving conduct of examination for admission to educational institutions,True
+999299,SAC,6,Other Educational support services,True
+9993,SAC,4,Human health and social care services,True
+999311,SAC,6,Inpatient services,True
+999312,SAC,6,Medical and dental services,True
+999313,SAC,6,Childbirth and related services,True
+999314,SAC,6,Nursing and physiotherapeutic services,True
+999315,SAC,6,Ambulance services,True
+999316,SAC,6,Medical laboratory and diagnostic-imaging services,True
+999317,SAC,6,"Blood, sperm and organ bank services",True
+999318,SAC,6,"Blood, sperm and organ bank services",True
+999319,SAC,6,"Other human health services including homeopathy, unani, ayurveda, naturopathy, acupuncture and the like",True
+999321,SAC,6,Residential health-care services other than by hospitals,True
+999322,SAC,6,Residential care services for the elderly and persons with disabilities,True
+999331,SAC,6,"Residential care services for children suffering from mental retardation, mental health illnesses or substance abuse",True
+999332,SAC,6,Other social services with accommodation for children,True
+999333,SAC,6,"Residential care services for adults suffering from mental retardation, mental health illnesses or substance abuse",True
+999334,SAC,6,Other social services with accommodation for adults,True
+999341,SAC,6,Vocational rehabilitation services,True
+999349,SAC,6,Other social services without accommodation for the elderly and disabled nowhere else classified,True
+999351,SAC,6,Child day-care services,True
+999352,SAC,6,Guidance and counseling services nowhere else classified related to children,True
+999353,SAC,6,Welfare services without accommodation,True
+999359,SAC,6,Other social services without accommodation nowhere else classified,True
+9994,SAC,4,"Sewage and waste collection, treatment and disposal and other environmental protection services",True
+999411,SAC,6,Sewerage and sewage treatment services,True
+999412,SAC,6,Septic tank emptying and cleaning services,True
+999413,SAC,6,Septic tank emptying and cleaning services,True
+999419,SAC,6,"Other sewerage, sewage treatment and septic tank cleaning services",True
+999421,SAC,6,Collection services of hazardous waste,True
+999422,SAC,6,Collection services of non-hazardous recyclable materials,True
+999423,SAC,6,"General waste collection services, residential",True
+999424,SAC,6,"General waste collection services, other nowhere else classified",True
+999429,SAC,6,Other sewage and waste collection services,True
+999431,SAC,6,"Waste preparation, consolidation and storage services",True
+999432,SAC,6,Hazardous waste treatment and disposal services,True
+999433,SAC,6,Non-hazardous waste treatment and disposal services,True
+999439,SAC,6,Other waste treatment and disposal services,True
+999441,SAC,6,Site remediation and clean-up services,True
+999442,SAC,6,"Containment, control and monitoring services and other site remediation services",True
+999443,SAC,6,Building remediation services,True
+999449,SAC,6,Other remediation services nowhere else classified,True
+999451,SAC,6,Sweeping and snow removal services,True
+999459,SAC,6,Other sanitation services nowhere else classified,True
+999490,SAC,6,Other environmental protection services nowhere else classified,True
+999491,SAC,6,Services by way of treatment or disposal of biomedical waste or the processes incidental thereto by a common biomedical waste treatment facility to a clinical establishment.,True
+999499,SAC,6,Other environmental protection services nowhere else classified,True
+9995,SAC,4,Services of membership organisations,True
+999511,SAC,6,Services furnished by business and employers organisations,True
+999512,SAC,6,Services furnished by professional organisations,True
+999520,SAC,6,Services furnished by trade unions,True
+999591,SAC,6,Religious services,True
+999592,SAC,6,Services furnished by political organisations,True
+999593,SAC,6,Services furnished by human rights organisations,True
+999594,SAC,6,Cultural and recreational associations,True
+999595,SAC,6,Services furnished by environmental advocacy groups,True
+999596,SAC,6,Services provided by youth associations,True
+999597,SAC,6,Other civic and social organisations,True
+999598,SAC,6,Home owners associations,True
+999599,SAC,6,Services provided by other membership organisations nowhere else classified,True
+9996,SAC,4,"Recreational, cultural and sporting services",True
+999611,SAC,6,Sound recording services,True
+999612,SAC,6,"Motion picture, videotape, television and radio programme production services",True
+999613,SAC,6,Audiovisual post-production services,True
+999614,SAC,6,"Motion picture, videotape and television programme distribution services",True
+999615,SAC,6,Motion picture projection services,True
+999616,SAC,6,Services by way of admission to exhibition of cinematograph films where price of admission ticket is one hundred rupees or less,True
+999617,SAC,6,Services by way of admission to exhibition of cinematograph films where price of admission ticket is above one hundred rupees.,True
+999621,SAC,6,Performing arts event promotion and organisation services,True
+999622,SAC,6,Performing arts event production and presentation services,True
+999623,SAC,6,Performing arts facility operation services,True
+999624,SAC,6,"Services by way of admission or access to circus, Indian classical dance including folk dance, theatrical performance, drama [or planetarium], ballet etc.",True
+999629,SAC,6,Other performing arts and live entertainment services nowhere else classified,True
+999631,SAC,6,"Services of performing artists including actors, readers, musicians, singers, dancers, television personalities, independent models and the like",True
+999632,SAC,6,"Services of authors, composers, sculptors and other artists, except performing artists",True
+999633,SAC,6,"Original works of authors, composers and other artists except performing artists, painters and sculptors",True
+999641,SAC,6,Museum and preservation services of historical sites and buildings,True
+999642,SAC,6,"Botanical, zoological and nature reserve services",True
+999651,SAC,6,Sports and recreational sports event promotion and organisation services,True
+999652,SAC,6,Sports and recreational sports facility operation services,True
+999653,SAC,6,Services by way of admission to sporting events like Indian Premier League.,True
+999659,SAC,6,Other sports and recreational sports services nowhere else classified,True
+999661,SAC,6,Services of athletes,True
+999662,SAC,6,Support services related to sports and recreation,True
+999691,SAC,6,Amusement park and similar attraction services,True
+999692,SAC,6,Coin-operated amusement machine services,True
+999693,SAC,6,Coin-operated amusement machine services,True
+999694,SAC,6,Services by way of admission to casinos or race clubs or any place having casinos or race clubs,True
+999699,SAC,6,Other recreation and amusement services nowhere else classified,True
+9997,SAC,4,Other services,True
+999711,SAC,6,Coin-operated laundry services,True
+999712,SAC,6,Dry-cleaning services (including fur product cleaning services),True
+999713,SAC,6,Other textile cleaning services,True
+999714,SAC,6,Pressing services,True
+999715,SAC,6,Dyeing and colouring services,True
+999719,SAC,6,"Other washing, cleaning and dyeing services nowhere else classified",True
+999721,SAC,6,Hairdressing and barbers services,True
+999722,SAC,6,"Cosmetic treatment (including cosmetic or plastic surgery), manicuring and pedicuring services",True
+999723,SAC,6,Physical well-being services including health club and fitness centre,True
+999729,SAC,6,Other beauty treatment services nowhere else classified,True
+999731,SAC,6,Cemeteries and cremation services,True
+999732,SAC,6,Undertaking services,True
+999791,SAC,6,Services involving commercial use or exploitation of any event,True
+999792,SAC,6,Agreeing to do an act,True
+999793,SAC,6,Agreeing to refrain from doing an act,True
+999794,SAC,6,Agreeing to tolerate an act,True
+999795,SAC,6,Conduct of religious ceremonies or rituals by persons,True
+999799,SAC,6,Other services nowhere else classified,True
+9998,SAC,4,Domestic services,True
+999800,SAC,6,Domestic services both part time and full time,True
+9999,SAC,4,Services provided by extraterritorial organisations and bodies,True
+999900,SAC,6,Services provided by extraterritorial organisations and bodies,True
+996541,SAC,6,Multimodal Transport of goods from a place in India to another place in India,True

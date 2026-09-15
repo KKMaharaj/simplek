@@ -1,4 +1,6 @@
-# simple_billing
+# Simplek
+
+Invoicing made easy.
 
 A new Flutter project.
 

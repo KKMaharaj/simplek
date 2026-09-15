@@ -1,11 +1,11 @@
 {
-    "name": "simple_billing",
-    "short_name": "simple_billing",
+    "name": "Simplek — Invoicing made easy",
+    "short_name": "Simplek",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#FFFFFF",
+    "theme_color": "#193A73",
+    "description": "Invoicing made easy",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

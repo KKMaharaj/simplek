@@ -1,5 +1,5 @@
-name: simple_billing
-description: "A new Flutter project."
+name: simplek
+description: "Simplek — Invoicing made easy."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -34,6 +34,18 @@ dependencies:
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
+  shared_preferences: ^2.5.4
+  supabase_flutter: ^2.17.1
+  pdf: ^3.13.0
+  printing: ^5.15.0
+  url_launcher: ^6.3.2
+  image_picker: ^1.2.1
+  qr_flutter: ^4.1.0
+  share_plus: ^13.3.0
+  excel_plus: ^2.16.0
+  uuid: ^4.6.0
+  flutter_secure_storage: 10.0.0
+  path_provider: ^2.1.6
 
 dev_dependencies:
   flutter_test:
@@ -45,6 +57,7 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -56,6 +69,27 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+  assets:
+    - assets/branding/simplek-logo-hd.png
+    - assets/branding/simplek-app-icon-hd.png
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/branding/simplek-app-icon-hd.png"
+  remove_alpha_ios: true
+  web:
+    generate: true
+    image_path: "assets/branding/simplek-app-icon-hd.png"
+    background_color: "#FFFFFF"
+    theme_color: "#193A73"
+  windows:
+    generate: true
+    image_path: "assets/branding/simplek-app-icon-hd.png"
+    icon_size: 256
+  macos:
+    generate: true
+    image_path: "assets/branding/simplek-app-icon-hd.png"
 
   # To add assets to your application, add an assets section, like this:
   # assets:

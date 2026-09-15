@@ -1,0 +1,26 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" rx="112" fill="#12306B"/>
+
+  <g transform="translate(15,-5)">
+    <g transform="rotate(-8 210 240)">
+      <rect x="150" y="140" width="150" height="196" rx="10" fill="#3E7BE0"/>
+    </g>
+
+    <g>
+      <rect x="140" y="130" width="150" height="210" rx="10" fill="#FFFFFF"/>
+      <line x1="140" y1="170" x2="290" y2="170" stroke="#DCE3EF" stroke-width="2" stroke-dasharray="3 6"/>
+      <rect x="160" y="152" width="70" height="12" rx="6" fill="#12306B"/>
+      <rect x="160" y="192" width="110" height="9" rx="4.5" fill="#B9C6DE"/>
+      <rect x="160" y="216" width="110" height="9" rx="4.5" fill="#B9C6DE"/>
+      <rect x="160" y="240" width="80" height="9" rx="4.5" fill="#B9C6DE"/>
+
+      <line x1="160" y1="272" x2="270" y2="272" stroke="#DCE3EF" stroke-width="2"/>
+      <rect x="160" y="288" width="55" height="14" rx="4" fill="#12306B"/>
+      <text x="240" y="300" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="700" fill="#12306B" text-anchor="end">₹</text>
+    </g>
+
+    <circle cx="300" cy="330" r="46" fill="#F5A623"/>
+    <circle cx="300" cy="330" r="46" fill="none" stroke="#FFFFFF" stroke-width="5"/>
+    <path d="M278 330 L294 346 L324 314" fill="none" stroke="#FFFFFF" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
