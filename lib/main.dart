@@ -228,6 +228,7 @@ String? _stateFromGstin(String gstin) =>
 
 class _RecordAutocompleteField extends StatefulWidget {
   const _RecordAutocompleteField({
+    super.key,
     required this.controller,
     required this.loadOptions,
     required this.displayStringForOption,
@@ -422,18 +423,12 @@ Future<Map<String, dynamic>?> _addProductFromDocumentBuilder(
   BuildContext context,
   String name,
 ) async {
-  final saved = await Navigator.of(context).push<bool>(
-    MaterialPageRoute<bool>(builder: (_) => AddProductPage(initialName: name)),
+  final saved = await Navigator.of(context).push<Map<String, dynamic>>(
+    MaterialPageRoute<Map<String, dynamic>>(
+      builder: (_) => AddProductPage(initialName: name, returnRecord: true),
+    ),
   );
-  if (saved != true || !context.mounted) return null;
-  final row = await Supabase.instance.client
-      .from('products')
-      .select('id, name, product_type, sku, selling_price, uqc_code, gst_rate')
-      .eq('name', name)
-      .eq('is_active', true)
-      .limit(1)
-      .maybeSingle();
-  return row == null ? null : Map<String, dynamic>.from(row);
+  return saved;
 }
 
 Future<Map<String, dynamic>?> _addCustomerFromDocumentBuilder(
@@ -441,14 +436,7 @@ Future<Map<String, dynamic>?> _addCustomerFromDocumentBuilder(
   String name,
 ) async {
   final saved = await _showCustomerForm(context, initialName: name);
-  if (!saved || !context.mounted) return null;
-  final row = await Supabase.instance.client
-      .from('customers')
-      .select('name, phone, email, gstin, state')
-      .eq('name', name)
-      .limit(1)
-      .maybeSingle();
-  return row == null ? null : Map<String, dynamic>.from(row);
+  return saved;
 }
 
 class OfflineStore {
@@ -3191,24 +3179,24 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 }
 
-Future<bool> _showCustomerForm(
+Future<Map<String, dynamic>?> _showCustomerForm(
   BuildContext context, {
   Map<String, dynamic>? customer,
   String? initialName,
 }) async {
-  final saved = await showDialog<bool>(
+  final saved = await showDialog<Map<String, dynamic>>(
     context: context,
     builder: (_) =>
         _CustomerFormDialog(customer: customer, initialName: initialName),
   );
 
-  if (saved == true && context.mounted) {
+  if (saved != null && context.mounted) {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Customer saved successfully')),
     );
   }
 
-  return saved ?? false;
+  return saved;
 }
 
 class CustomersPage extends StatefulWidget {
@@ -3291,12 +3279,12 @@ class _CustomersPageState extends State<CustomersPage> {
 
   Future<void> _addCustomer() async {
     final saved = await _showCustomerForm(context);
-    if (saved) await _loadCustomers();
+    if (saved != null) await _loadCustomers();
   }
 
   Future<void> _editCustomer(Map<String, dynamic> customer) async {
     final saved = await _showCustomerForm(context, customer: customer);
-    if (saved) await _loadCustomers();
+    if (saved != null) await _loadCustomers();
   }
 
   @override
@@ -4963,7 +4951,13 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
 }
 
 class AddProductPage extends StatefulWidget {
-  const AddProductPage({super.key, this.product, this.initialName});
+  const AddProductPage({
+    super.key,
+    this.product,
+    this.initialName,
+    this.returnRecord = false,
+  });
+  final bool returnRecord;
 
   final Map<String, dynamic>? product;
   final String? initialName;
@@ -7352,7 +7346,15 @@ class _QuotationPreviewPageState extends State<QuotationPreviewPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Quotation Preview')),
+    appBar: AppBar(
+      title: const Text('Quotation Preview'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
+          child: const Text('Close'),
+        ),
+      ],
+    ),
     body: _error != null
         ? Center(
             child: Padding(
@@ -7365,13 +7367,14 @@ class _QuotationPreviewPageState extends State<QuotationPreviewPage> {
           )
         : _items.isEmpty
         ? const Center(child: CircularProgressIndicator())
-        : PdfPreview(
-            build: _pdf,
-            canDebug: false,
-            canChangePageFormat: false,
-            canChangeOrientation: false,
-            allowPrinting: true,
-            allowSharing: false,
+        : _SavedDocumentPreview(
+            buildPdf: _pdf,
+            addNewLabel: 'Save & Add New Quotation',
+            onAddNew: () => Navigator.of(context).pushReplacement(
+              MaterialPageRoute<void>(
+                builder: (_) => const QuotationBuilderPage(),
+              ),
+            ),
           ),
     bottomNavigationBar: SafeArea(
       child: Padding(
@@ -7626,6 +7629,7 @@ class InvoiceBuilderPage extends StatefulWidget {
 }
 
 class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
+  int _customerListVersion = 0;
   final _formKey = GlobalKey<FormState>();
   final _customerController = TextEditingController();
   final _customerPhoneController = TextEditingController();
@@ -8025,8 +8029,8 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
     }
     if (!saved || !mounted) return;
     if (openPreview) {
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
+      final addNew = await Navigator.of(context).push<bool>(
+        MaterialPageRoute<bool>(
           builder: (_) => InvoicePreviewPage(
             invoiceNumber: savedNumber,
             balanceDue:
@@ -8049,6 +8053,12 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
         ),
       );
       if (!mounted) return;
+      if (addNew == true) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute<void>(builder: (_) => const InvoiceBuilderPage()),
+        );
+        return;
+      }
     }
     Navigator.of(context).popUntil((route) => route.isFirst);
   }
@@ -8072,14 +8082,15 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
 
   Future<void> _addCustomer() async {
     final saved = await _showCustomerForm(context);
-    if (saved && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Customer added. Enter the customer name for this invoice.',
-          ),
-        ),
-      );
+    if (saved != null && mounted) {
+      _selectInvoiceCustomer(saved);
+      try {
+        final options = await _customerOptions;
+        options.add(saved);
+      } catch (_) {
+        // Selection still works if the initial customer list failed to load.
+      }
+      if (mounted) setState(() => _customerListVersion++);
     }
   }
 
@@ -8265,6 +8276,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
                 children: [
                   _RecordAutocompleteField(
+                    key: ValueKey(_customerListVersion),
                     controller: _customerController,
                     loadOptions: () => _customerOptions,
                     displayStringForOption: (row) =>
@@ -8615,6 +8627,60 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
       );
 }
 
+class _SavedDocumentPreview extends StatelessWidget {
+  const _SavedDocumentPreview({
+    required this.buildPdf,
+    required this.addNewLabel,
+    required this.onAddNew,
+  });
+  final Future<Uint8List> Function(PdfPageFormat) buildPdf;
+  final String addNewLabel;
+  final VoidCallback onAddNew;
+  @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      Expanded(
+        child: PdfPreview(
+          build: buildPdf,
+          useActions: false,
+          canDebug: false,
+          canChangePageFormat: false,
+          canChangeOrientation: false,
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.all(12),
+        child: SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: onAddNew,
+            icon: const Icon(Icons.add),
+            label: Text(addNewLabel),
+          ),
+        ),
+      ),
+      SizedBox(
+        width: double.infinity,
+        child: TextButton.icon(
+          onPressed: () async {
+            try {
+              await Printing.layoutPdf(onLayout: buildPdf);
+            } catch (error) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Unable to print: $error')),
+                );
+              }
+            }
+          },
+          icon: const Icon(Icons.print),
+          label: const Text('Print'),
+        ),
+      ),
+    ],
+  );
+}
+
 class InvoicePreviewPage extends StatefulWidget {
   const InvoicePreviewPage({
     super.key,
@@ -8962,14 +9028,19 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Invoice Preview')),
-    body: PdfPreview(
-      build: _generatePdf,
-      canDebug: false,
-      canChangePageFormat: false,
-      canChangeOrientation: false,
-      allowPrinting: true,
-      allowSharing: false,
+    appBar: AppBar(
+      title: const Text('Invoice Preview'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Close'),
+        ),
+      ],
+    ),
+    body: _SavedDocumentPreview(
+      buildPdf: _generatePdf,
+      addNewLabel: 'Save & Add New Invoice',
+      onAddNew: () => Navigator.of(context).pop(true),
     ),
     bottomNavigationBar: SafeArea(
       child: Padding(
@@ -9442,7 +9513,11 @@ class _AddProductPageState extends State<AddProductPage> {
         queuedOffline = true;
       }
       if (!mounted) return;
-      Navigator.of(context).pop(true);
+      Navigator.of(context).pop(
+        widget.returnRecord
+            ? <String, dynamic>{...?widget.product, ...product}
+            : true,
+      );
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -9902,7 +9977,11 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
         await OfflineStore.addCached('customers', customer);
       }
 
-      if (mounted) Navigator.of(context).pop(true);
+      if (mounted) {
+        Navigator.of(
+          context,
+        ).pop(<String, dynamic>{...?widget.customer, ...customer});
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _isSaving = false);
