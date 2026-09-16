@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'document_defaults.dart';
 import 'payment_pdf.dart';
+import 'modern_ui.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -788,6 +789,7 @@ Future<void> main() async {
   );
 
   await BusinessSettings.load();
+  await DesignSettings.load();
 
   runApp(const MyApp());
 }
@@ -803,73 +805,86 @@ class MyApp extends StatelessWidget {
       seedColor: const Color(0xFF3157A4),
       brightness: Brightness.light,
     );
-    return ValueListenableBuilder<ThemeMode>(
-      valueListenable: BusinessSettings.themeMode,
-      builder: (context, mode, _) => MaterialApp(
-        themeMode: mode,
-        darkTheme: ThemeData(
-          useMaterial3: true,
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFF3157A4),
-            brightness: Brightness.dark,
-          ),
-          inputDecorationTheme: InputDecorationTheme(
-            filled: true,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-            contentPadding: const EdgeInsets.all(16),
-          ),
-          filledButtonTheme: FilledButtonThemeData(
-            style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
-          ),
+    return ValueListenableBuilder<bool>(
+      valueListenable: DesignSettings.modern,
+      builder: (context, modern, _) => ValueListenableBuilder<ThemeMode>(
+        valueListenable: BusinessSettings.themeMode,
+        builder: (context, mode, _) => MaterialApp(
+          themeMode: mode,
+          darkTheme: modern
+              ? simplekTheme(Brightness.dark)
+              : ThemeData(
+                  useMaterial3: true,
+                  colorScheme: ColorScheme.fromSeed(
+                    seedColor: const Color(0xFF3157A4),
+                    brightness: Brightness.dark,
+                  ),
+                  inputDecorationTheme: InputDecorationTheme(
+                    filled: true,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    contentPadding: const EdgeInsets.all(16),
+                  ),
+                  filledButtonTheme: FilledButtonThemeData(
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(48, 52),
+                    ),
+                  ),
+                ),
+          debugShowCheckedModeBanner: false,
+          title: 'Simplek',
+          theme: modern
+              ? simplekTheme(Brightness.light)
+              : ThemeData(
+                  useMaterial3: true,
+                  colorScheme: colorScheme,
+                  scaffoldBackgroundColor: const Color(0xFFF6F7FB),
+                  appBarTheme: const AppBarTheme(
+                    backgroundColor: Color(0xFFF6F7FB),
+                    surfaceTintColor: Colors.transparent,
+                    centerTitle: false,
+                  ),
+                  inputDecorationTheme: InputDecorationTheme(
+                    filled: true,
+                    fillColor: Colors.white,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 16,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: colorScheme.outlineVariant),
+                    ),
+                  ),
+                  cardTheme: CardThemeData(
+                    elevation: 0,
+                    color: Colors.white,
+                    margin: EdgeInsets.zero,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: BorderSide(color: colorScheme.outlineVariant),
+                    ),
+                  ),
+                  filledButtonTheme: FilledButtonThemeData(
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(48, 52),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                  floatingActionButtonTheme: FloatingActionButtonThemeData(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                ),
+          home: home ?? const AppLaunchSplash(),
         ),
-        debugShowCheckedModeBanner: false,
-        title: 'Simplek',
-        theme: ThemeData(
-          useMaterial3: true,
-          colorScheme: colorScheme,
-          scaffoldBackgroundColor: const Color(0xFFF6F7FB),
-          appBarTheme: const AppBarTheme(
-            backgroundColor: Color(0xFFF6F7FB),
-            surfaceTintColor: Colors.transparent,
-            centerTitle: false,
-          ),
-          inputDecorationTheme: InputDecorationTheme(
-            filled: true,
-            fillColor: Colors.white,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: 16,
-            ),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: colorScheme.outlineVariant),
-            ),
-          ),
-          cardTheme: CardThemeData(
-            elevation: 0,
-            color: Colors.white,
-            margin: EdgeInsets.zero,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-              side: BorderSide(color: colorScheme.outlineVariant),
-            ),
-          ),
-          filledButtonTheme: FilledButtonThemeData(
-            style: FilledButton.styleFrom(
-              minimumSize: const Size(48, 52),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-          floatingActionButtonTheme: FloatingActionButtonThemeData(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-          ),
-        ),
-        home: home ?? const AppLaunchSplash(),
       ),
     );
   }
@@ -1010,12 +1025,164 @@ class _AuthGateState extends State<AuthGate> {
         mobile: pendingSignup['mobile']!,
       );
     }
-    return const DashboardPage();
+    return ValueListenableBuilder<bool>(
+      valueListenable: DesignSettings.modern,
+      builder: (_, modern, _) =>
+          modern ? const _ModernHome() : const DashboardPage(),
+    );
   }
 }
 
 void _openPage(BuildContext context, Widget page) {
   Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
+}
+
+void _returnToDashboard(BuildContext context) {
+  DesignSettings.destination.value = 0;
+  Navigator.of(context).popUntil((route) => route.isFirst);
+}
+
+class _ModernHome extends StatelessWidget {
+  const _ModernHome();
+
+  Future<void> _create(BuildContext context) async {
+    final choice = await showModalBottomSheet<int>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheet) => SafeArea(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: EditorSection(
+                  'Create something new',
+                  'Choose your next action.',
+                ),
+              ),
+              for (final entry in const [
+                (Icons.receipt_long_outlined, 'New invoice'),
+                (Icons.description_outlined, 'New quotation'),
+                (Icons.payments_outlined, 'Record payment'),
+              ].indexed)
+                ListTile(
+                  leading: Icon(entry.$2.$1),
+                  title: Text(entry.$2.$2),
+                  onTap: () => Navigator.of(sheet).pop(entry.$1),
+                ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (!context.mounted || choice == null) return;
+    _openPage(context, switch (choice) {
+      0 => const InvoiceBuilderPage(),
+      1 => const QuotationBuilderPage(),
+      _ => const PaymentsPage(),
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<int>(
+    valueListenable: DesignSettings.destination,
+    builder: (context, index, _) => PopScope(
+      canPop: index == 0,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) DesignSettings.destination.value = 0;
+      },
+      child: Scaffold(
+        body: switch (index) {
+          1 => const InvoiceHistoryPage(),
+          2 => const CustomersPage(),
+          3 => const ProductsPage(),
+          4 => const _MorePage(),
+          _ => const DashboardPage(),
+        },
+        floatingActionButton: index == 0 || index == 4
+            ? FloatingActionButton.extended(
+                onPressed: () => _create(context),
+                icon: const Icon(Icons.add),
+                label: const Text('Create'),
+              )
+            : null,
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: index,
+          labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
+          onDestinationSelected: (value) =>
+              DesignSettings.destination.value = value,
+          destinations: const [
+            NavigationDestination(
+              icon: Icon(Icons.grid_view_outlined),
+              selectedIcon: Icon(Icons.grid_view_rounded),
+              label: 'Home',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.receipt_long_outlined),
+              label: 'Invoices',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.people_outline),
+              label: 'Customers',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.inventory_2_outlined),
+              label: 'Products',
+            ),
+            NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _MorePage extends StatelessWidget {
+  const _MorePage();
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('More')),
+    body: ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        const EditorSection(
+          'Your business tools',
+          'Documents, payments and preferences.',
+        ),
+        for (final entry in <(IconData, String, Widget)>[
+          (Icons.description_outlined, 'Quotations', const QuotationsPage()),
+          (Icons.payments_outlined, 'Payments', const PaymentsPage()),
+          (Icons.bar_chart_outlined, 'Reports', const ReportsPage()),
+          (Icons.search, 'Search everything', const GlobalSearchPage()),
+          (
+            Icons.settings_outlined,
+            'Business Profile & Settings',
+            const BusinessSettingsPage(),
+          ),
+        ])
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Card(
+              child: ListTile(
+                contentPadding: const EdgeInsets.all(16),
+                leading: Icon(entry.$1),
+                title: Text(entry.$2),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => _openPage(context, entry.$3),
+              ),
+            ),
+          ),
+        const SizedBox(height: 16),
+        TextButton.icon(
+          onPressed: () async => Supabase.instance.client.auth.signOut(),
+          icon: const Icon(Icons.logout),
+          label: const Text('Log out'),
+        ),
+      ],
+    ),
+  );
 }
 
 class LoginPage extends StatefulWidget {
@@ -1417,7 +1584,7 @@ class _EmailLinkWaitingPageState extends State<EmailLinkWaitingPage> {
       state,
     ) {
       if (state.session != null && mounted) {
-        Navigator.of(context).popUntil((route) => route.isFirst);
+        _returnToDashboard(context);
       }
     });
   }
@@ -1942,7 +2109,7 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
           ],
         ),
       );
-      if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
+      if (mounted) _returnToDashboard(context);
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2126,7 +2293,7 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
               : 'Enter a valid PAN',
         ),
         const SizedBox(height: 12),
-        DropdownButtonFormField<String>(
+        SearchableStateField(
           initialValue:
               _indianStatesAndUnionTerritories.contains(_stateController.text)
               ? _stateController.text
@@ -2150,7 +2317,7 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
               value == null ? 'Select the business state' : null,
         ),
         const SizedBox(height: 12),
-        DropdownButtonFormField<String>(
+        SearchableStateField(
           initialValue:
               _indianStatesAndUnionTerritories.contains(
                 _placeOfSupplyController.text,
@@ -2770,372 +2937,418 @@ class _DashboardPageState extends State<DashboardPage> {
         ],
       ),
 
-      drawer: Drawer(
-        child: SafeArea(
-          child: ListView(
-            padding: EdgeInsets.zero,
-            children: [
-              DrawerHeader(
-                decoration: const BoxDecoration(color: Colors.indigo),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.end,
+      drawer: DesignSettings.modern.value
+          ? null
+          : Drawer(
+              child: SafeArea(
+                child: ListView(
+                  padding: EdgeInsets.zero,
                   children: [
-                    Image.asset(
-                      'assets/branding/simplek-app-icon-hd.png',
-                      width: 48,
-                      height: 48,
-                    ),
-                    const SizedBox(height: 10),
-                    const Text(
-                      'Simplek',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const Text(
-                      'Invoicing made easy',
-                      style: TextStyle(color: Colors.white70),
-                    ),
-                  ],
-                ),
-              ),
-
-              ListTile(
-                leading: const Icon(Icons.dashboard_outlined),
-                title: const Text('Dashboard'),
-                selected: true,
-                onTap: () => Navigator.pop(context),
-              ),
-
-              ListTile(
-                leading: const Icon(Icons.people_outline),
-                title: const Text('Customers'),
-                onTap: () {
-                  final navigator = Navigator.of(context);
-                  navigator.pop();
-                  navigator.push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const CustomersPage(),
-                    ),
-                  );
-                },
-              ),
-
-              ListTile(
-                leading: const Icon(Icons.inventory_2_outlined),
-                title: const Text('Products & Services'),
-                onTap: () => _openPage(context, const ProductsPage()),
-              ),
-
-              ListTile(
-                leading: const Icon(Icons.receipt_long_outlined),
-                title: const Text('Invoices'),
-                onTap: () => _openPage(context, const InvoiceHistoryPage()),
-              ),
-
-              ListTile(
-                leading: const Icon(Icons.description_outlined),
-                title: const Text('Quotations'),
-                onTap: () => _openPage(context, const QuotationsPage()),
-              ),
-
-              ListTile(
-                leading: const Icon(Icons.payments_outlined),
-                title: const Text('Payments'),
-                onTap: () => _openPage(context, const PaymentsPage()),
-              ),
-
-              ListTile(
-                leading: const Icon(Icons.bar_chart_outlined),
-                title: const Text('Reports'),
-                onTap: () => _openPage(context, const ReportsPage()),
-              ),
-
-              const Divider(),
-
-              ListTile(
-                leading: const Icon(Icons.settings_outlined),
-                title: const Text('Business Profile & Settings'),
-                onTap: () => _openPage(context, const BusinessSettingsPage()),
-              ),
-              const Divider(),
-              ListTile(
-                leading: const Icon(Icons.logout),
-                title: const Text('Log out'),
-                onTap: () async {
-                  Navigator.pop(context);
-                  await Supabase.instance.client.auth.signOut();
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
-
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Dashboard',
-              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-            ),
-
-            const SizedBox(height: 4),
-
-            Text(
-              'Here is your business overview',
-              style: TextStyle(color: Colors.grey.shade600, fontSize: 15),
-            ),
-
-            if (_summaryError != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                'Unable to refresh dashboard: $_summaryError',
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ],
-
-            const SizedBox(height: 24),
-
-            // Summary cards
-            Row(
-              children: [
-                Expanded(
-                  child: _summaryCard(
-                    title: 'Total Sales',
-                    value: _money(_totalSales),
-                    icon: Icons.trending_up,
-                    iconColor: Colors.green,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _summaryCard(
-                    title: 'Outstanding',
-                    value: _money(_outstanding),
-                    icon: Icons.account_balance_wallet_outlined,
-                    iconColor: Colors.orange,
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 12),
-
-            Row(
-              children: [
-                Expanded(
-                  child: _summaryCard(
-                    title: 'Invoices',
-                    value: _invoiceCount.toString(),
-                    icon: Icons.receipt_long_outlined,
-                    iconColor: Colors.indigo,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _summaryCard(
-                    title: 'Customers',
-                    value: _customerCount.toString(),
-                    icon: Icons.people_outline,
-                    iconColor: Colors.purple,
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 28),
-
-            const Text(
-              'Quick Actions',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-
-            const SizedBox(height: 14),
-
-            Row(
-              children: [
-                Expanded(
-                  child: _actionButton(
-                    icon: Icons.add,
-                    title: 'New Invoice',
-                    color: Colors.indigo,
-                    onTap: () => _openPage(context, const InvoiceBuilderPage()),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _actionButton(
-                    icon: Icons.person_add_outlined,
-                    title: 'New Customer',
-                    color: Colors.green,
-                    onTap: () {
-                      debugPrint('NEW CUSTOMER TAPPED');
-                      _showCustomerForm(context);
-                    },
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 12),
-
-            Row(
-              children: [
-                Expanded(
-                  child: _actionButton(
-                    icon: Icons.inventory_2_outlined,
-                    title: 'Add Product',
-                    color: Colors.orange,
-                    onTap: () => _openPage(context, const ProductsPage()),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _actionButton(
-                    icon: Icons.payment_outlined,
-                    title: 'Record Payment',
-                    color: Colors.purple,
-                    onTap: () async {
-                      await Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => const PaymentsPage(),
-                        ),
-                      );
-                      await _loadSummary();
-                    },
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 28),
-
-            const Text(
-              'Recent Invoices',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-
-            const SizedBox(height: 14),
-
-            if (_isLoadingSummary)
-              const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(24),
-                  child: CircularProgressIndicator(),
-                ),
-              )
-            else if (_recentInvoices.isEmpty)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(28),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Column(
-                  children: [
-                    Icon(
-                      Icons.receipt_long_outlined,
-                      size: 52,
-                      color: Colors.grey.shade400,
-                    ),
-                    const SizedBox(height: 12),
-                    const Text(
-                      'No invoices yet',
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Create your first invoice to get started.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.grey.shade600),
-                    ),
-                    const SizedBox(height: 18),
-                    FilledButton.icon(
-                      onPressed: () =>
-                          _openPage(context, const InvoiceBuilderPage()),
-                      icon: const Icon(Icons.add),
-                      label: const Text('Create Invoice'),
-                    ),
-                  ],
-                ),
-              )
-            else
-              Card(
-                clipBehavior: Clip.antiAlias,
-                child: Column(
-                  children: List.generate(_recentInvoices.length, (index) {
-                    final invoice = _recentInvoices[index];
-                    final status = invoice['status']?.toString() ?? 'draft';
-                    return Column(
-                      children: [
-                        ListTile(
-                          leading: CircleAvatar(
-                            child: Icon(
-                              status == 'paid'
-                                  ? Icons.check
-                                  : Icons.receipt_long_outlined,
+                    DrawerHeader(
+                      decoration: const BoxDecoration(color: Colors.indigo),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Image.asset(
+                            'assets/branding/simplek-app-icon-hd.png',
+                            width: 48,
+                            height: 48,
+                          ),
+                          const SizedBox(height: 10),
+                          const Text(
+                            'Simplek',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
-                          title: Text(
-                            invoice['invoice_number']?.toString() ?? 'Invoice',
+                          const Text(
+                            'Invoicing made easy',
+                            style: TextStyle(color: Colors.white70),
                           ),
-                          subtitle: Text(
-                            '${invoice['customer_name'] ?? ''} • ${invoice['invoice_date'] ?? ''}\n${status.toUpperCase()}',
+                        ],
+                      ),
+                    ),
+
+                    ListTile(
+                      leading: const Icon(Icons.dashboard_outlined),
+                      title: const Text('Dashboard'),
+                      selected: true,
+                      onTap: () => Navigator.pop(context),
+                    ),
+
+                    ListTile(
+                      leading: const Icon(Icons.people_outline),
+                      title: const Text('Customers'),
+                      onTap: () {
+                        final navigator = Navigator.of(context);
+                        navigator.pop();
+                        navigator.push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const CustomersPage(),
                           ),
-                          isThreeLine: true,
-                          trailing: Text(
-                            _money(_asDouble(invoice['total_amount'])),
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          onTap: () =>
-                              _openPage(context, const InvoiceHistoryPage()),
-                        ),
-                        if (index < _recentInvoices.length - 1)
-                          const Divider(height: 1),
-                      ],
-                    );
-                  }),
+                        );
+                      },
+                    ),
+
+                    ListTile(
+                      leading: const Icon(Icons.inventory_2_outlined),
+                      title: const Text('Products & Services'),
+                      onTap: () => _openPage(context, const ProductsPage()),
+                    ),
+
+                    ListTile(
+                      leading: const Icon(Icons.receipt_long_outlined),
+                      title: const Text('Invoices'),
+                      onTap: () =>
+                          _openPage(context, const InvoiceHistoryPage()),
+                    ),
+
+                    ListTile(
+                      leading: const Icon(Icons.description_outlined),
+                      title: const Text('Quotations'),
+                      onTap: () => _openPage(context, const QuotationsPage()),
+                    ),
+
+                    ListTile(
+                      leading: const Icon(Icons.payments_outlined),
+                      title: const Text('Payments'),
+                      onTap: () => _openPage(context, const PaymentsPage()),
+                    ),
+
+                    ListTile(
+                      leading: const Icon(Icons.bar_chart_outlined),
+                      title: const Text('Reports'),
+                      onTap: () => _openPage(context, const ReportsPage()),
+                    ),
+
+                    const Divider(),
+
+                    ListTile(
+                      leading: const Icon(Icons.settings_outlined),
+                      title: const Text('Business Profile & Settings'),
+                      onTap: () =>
+                          _openPage(context, const BusinessSettingsPage()),
+                    ),
+                    const Divider(),
+                    ListTile(
+                      leading: const Icon(Icons.logout),
+                      title: const Text('Log out'),
+                      onTap: () async {
+                        Navigator.pop(context);
+                        await Supabase.instance.client.auth.signOut();
+                      },
+                    ),
+                  ],
                 ),
               ),
+            ),
 
-            const SizedBox(height: 24),
-
-            // Supabase status
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: Colors.green.shade50,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.green.shade200),
-              ),
-              child: const Row(
+      body: DesignSettings.modern.value
+          ? ModernOverview(
+              sales: _money(_totalSales),
+              outstanding: _money(_outstanding),
+              invoiceCount: '$_invoiceCount',
+              customerCount: '$_customerCount',
+              loading: _isLoadingSummary,
+              error: _summaryError,
+              recent: _recentInvoices
+                  .map(
+                    (row) => <String, String>{
+                      'number': row['invoice_number']?.toString() ?? 'Invoice',
+                      'customer': row['customer_name']?.toString() ?? '',
+                      'amount': _money(_asDouble(row['total_amount'])),
+                      'status': row['status']?.toString() ?? 'draft',
+                      'date': row['invoice_date']?.toString() ?? '',
+                    },
+                  )
+                  .toList(),
+              onNewInvoice: () =>
+                  _openPage(context, const InvoiceBuilderPage()),
+              onNewQuotation: () =>
+                  _openPage(context, const QuotationBuilderPage()),
+              onCustomer: () async {
+                await _showCustomerForm(context);
+                if (mounted) await _loadSummary();
+              },
+              onProduct: () => _openPage(context, const AddProductPage()),
+              onInvoices: () => DesignSettings.destination.value = 1,
+              onRefresh: _loadSummary,
+            )
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.cloud_done_outlined, color: Colors.green),
-                  SizedBox(width: 10),
+                  const Text(
+                    'Dashboard',
+                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+                  ),
+
+                  const SizedBox(height: 4),
+
                   Text(
-                    'Supabase connected',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: Colors.green,
+                    'Here is your business overview',
+                    style: TextStyle(color: Colors.grey.shade600, fontSize: 15),
+                  ),
+
+                  if (_summaryError != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      'Unable to refresh dashboard: $_summaryError',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ],
+
+                  const SizedBox(height: 24),
+
+                  // Summary cards
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _summaryCard(
+                          title: 'Total Sales',
+                          value: _money(_totalSales),
+                          icon: Icons.trending_up,
+                          iconColor: Colors.green,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _summaryCard(
+                          title: 'Outstanding',
+                          value: _money(_outstanding),
+                          icon: Icons.account_balance_wallet_outlined,
+                          iconColor: Colors.orange,
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _summaryCard(
+                          title: 'Invoices',
+                          value: _invoiceCount.toString(),
+                          icon: Icons.receipt_long_outlined,
+                          iconColor: Colors.indigo,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _summaryCard(
+                          title: 'Customers',
+                          value: _customerCount.toString(),
+                          icon: Icons.people_outline,
+                          iconColor: Colors.purple,
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 28),
+
+                  const Text(
+                    'Quick Actions',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _actionButton(
+                          icon: Icons.add,
+                          title: 'New Invoice',
+                          color: Colors.indigo,
+                          onTap: () =>
+                              _openPage(context, const InvoiceBuilderPage()),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _actionButton(
+                          icon: Icons.person_add_outlined,
+                          title: 'New Customer',
+                          color: Colors.green,
+                          onTap: () {
+                            debugPrint('NEW CUSTOMER TAPPED');
+                            _showCustomerForm(context);
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _actionButton(
+                          icon: Icons.inventory_2_outlined,
+                          title: 'Add Product',
+                          color: Colors.orange,
+                          onTap: () => _openPage(context, const ProductsPage()),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _actionButton(
+                          icon: Icons.payment_outlined,
+                          title: 'Record Payment',
+                          color: Colors.purple,
+                          onTap: () async {
+                            await Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => const PaymentsPage(),
+                              ),
+                            );
+                            await _loadSummary();
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 28),
+
+                  const Text(
+                    'Recent Invoices',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  if (_isLoadingSummary)
+                    const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(24),
+                        child: CircularProgressIndicator(),
+                      ),
+                    )
+                  else if (_recentInvoices.isEmpty)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(28),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surface,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        children: [
+                          Icon(
+                            Icons.receipt_long_outlined,
+                            size: 52,
+                            color: Colors.grey.shade400,
+                          ),
+                          const SizedBox(height: 12),
+                          const Text(
+                            'No invoices yet',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Create your first invoice to get started.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Colors.grey.shade600),
+                          ),
+                          const SizedBox(height: 18),
+                          FilledButton.icon(
+                            onPressed: () =>
+                                _openPage(context, const InvoiceBuilderPage()),
+                            icon: const Icon(Icons.add),
+                            label: const Text('Create Invoice'),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    Card(
+                      clipBehavior: Clip.antiAlias,
+                      child: Column(
+                        children: List.generate(_recentInvoices.length, (
+                          index,
+                        ) {
+                          final invoice = _recentInvoices[index];
+                          final status =
+                              invoice['status']?.toString() ?? 'draft';
+                          return Column(
+                            children: [
+                              ListTile(
+                                leading: CircleAvatar(
+                                  child: Icon(
+                                    status == 'paid'
+                                        ? Icons.check
+                                        : Icons.receipt_long_outlined,
+                                  ),
+                                ),
+                                title: Text(
+                                  invoice['invoice_number']?.toString() ??
+                                      'Invoice',
+                                ),
+                                subtitle: Text(
+                                  '${invoice['customer_name'] ?? ''} • ${invoice['invoice_date'] ?? ''}\n${status.toUpperCase()}',
+                                ),
+                                isThreeLine: true,
+                                trailing: Text(
+                                  _money(_asDouble(invoice['total_amount'])),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                onTap: () => _openPage(
+                                  context,
+                                  const InvoiceHistoryPage(),
+                                ),
+                              ),
+                              if (index < _recentInvoices.length - 1)
+                                const Divider(height: 1),
+                            ],
+                          );
+                        }),
+                      ),
+                    ),
+
+                  const SizedBox(height: 24),
+
+                  // Supabase status
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.green.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.green.shade200),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.cloud_done_outlined, color: Colors.green),
+                        SizedBox(width: 10),
+                        Text(
+                          'Supabase connected',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: Colors.green,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
               ),
             ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -4460,6 +4673,8 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                const DesignSelector(),
+                const SizedBox(height: 24),
                 ValueListenableBuilder<ThemeMode>(
                   valueListenable: BusinessSettings.themeMode,
                   builder: (context, mode, _) =>
@@ -4629,7 +4844,7 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
                       setState(() => _gstRegistrationType = value!),
                 ),
                 const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
+                SearchableStateField(
                   initialValue:
                       _indianStatesAndUnionTerritories.contains(
                         _stateController.text,
@@ -4651,7 +4866,7 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
                   validator: (value) => value == null ? 'Select a state' : null,
                 ),
                 const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
+                SearchableStateField(
                   initialValue:
                       _indianStatesAndUnionTerritories.contains(
                         _placeOfSupplyController.text,
@@ -6799,7 +7014,7 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
           ),
         );
       } else {
-        Navigator.of(context).popUntil((route) => route.isFirst);
+        _returnToDashboard(context);
       }
     } catch (error) {
       if (mounted) {
@@ -6908,6 +7123,13 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
     appBar: AppBar(
       title: Text(_isEditing ? 'Edit Quotation' : 'New Quotation'),
     ),
+    bottomNavigationBar: DesignSettings.modern.value && !_loadingExisting
+        ? DocumentSaveBar(
+            saving: _saving,
+            onClose: () => _save(openPreview: false),
+            onNext: () => _save(openPreview: true),
+          )
+        : null,
     body: _loadingExisting
         ? const Center(child: CircularProgressIndicator())
         : Form(
@@ -6915,6 +7137,11 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
               children: [
+                if (DesignSettings.modern.value)
+                  const EditorSection(
+                    'Prepare your quotation',
+                    'Choose a customer, add items and review your totals.',
+                  ),
                 _RecordAutocompleteField(
                   controller: _customerController,
                   loadOptions: () => _customerOptions,
@@ -6932,7 +7159,7 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
                   leadingIcon: Icons.person_search_outlined,
                 ),
                 const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
+                SearchableStateField(
                   key: ValueKey(_placeOfSupplyController.text),
                   initialValue:
                       _indianStatesAndUnionTerritories.contains(
@@ -7021,47 +7248,50 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                TextField(
-                  controller: _termsController,
-                  minLines: 3,
-                  maxLines: 6,
-                  decoration: const InputDecoration(
-                    labelText: 'Terms and conditions',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
+                DesignSettings.modern.value
+                    ? EditableTerms(controller: _termsController)
+                    : TextField(
+                        controller: _termsController,
+                        minLines: 3,
+                        maxLines: 6,
+                        decoration: const InputDecoration(
+                          labelText: 'Terms and conditions',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
                 const SizedBox(height: 24),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: _saving
-                            ? null
-                            : () => _save(openPreview: false),
-                        icon: const Icon(Icons.close_outlined),
-                        label: const Text('Save & Close'),
+                if (!DesignSettings.modern.value)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _saving
+                              ? null
+                              : () => _save(openPreview: false),
+                          icon: const Icon(Icons.close_outlined),
+                          label: const Text('Save & Close'),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: _saving
-                            ? null
-                            : () => _save(openPreview: true),
-                        icon: _saving
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.arrow_forward_outlined),
-                        label: Text(_saving ? 'Saving...' : 'Save & Next'),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: _saving
+                              ? null
+                              : () => _save(openPreview: true),
+                          icon: _saving
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.arrow_forward_outlined),
+                          label: Text(_saving ? 'Saving...' : 'Save & Next'),
+                        ),
                       ),
-                    ),
-                  ],
-                ),
+                    ],
+                  ),
               ],
             ),
           ),
@@ -7427,7 +7657,7 @@ class _QuotationPreviewPageState extends State<QuotationPreviewPage> {
       title: const Text('Quotation Preview'),
       actions: [
         TextButton(
-          onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
+          onPressed: () => _returnToDashboard(context),
           child: const Text('Close'),
         ),
       ],
@@ -7453,38 +7683,44 @@ class _QuotationPreviewPageState extends State<QuotationPreviewPage> {
               ),
             ),
           ),
-    bottomNavigationBar: SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _items.isEmpty ? null : _openWhatsApp,
-                icon: const Icon(Icons.chat_outlined),
-                label: const Text('WhatsApp'),
+    bottomNavigationBar: DesignSettings.modern.value
+        ? DocumentShareBar(
+            onWhatsApp: _items.isEmpty ? null : _openWhatsApp,
+            onEmail: _items.isEmpty ? null : _openEmail,
+            onShare: _items.isEmpty ? null : _share,
+          )
+        : SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _items.isEmpty ? null : _openWhatsApp,
+                      icon: const Icon(Icons.chat_outlined),
+                      label: const Text('WhatsApp'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _items.isEmpty ? null : _openEmail,
+                      icon: const Icon(Icons.email_outlined),
+                      label: const Text('Email'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _items.isEmpty ? null : _share,
+                      icon: const Icon(Icons.share_outlined),
+                      label: const Text('Share PDF'),
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _items.isEmpty ? null : _openEmail,
-                icon: const Icon(Icons.email_outlined),
-                label: const Text('Email'),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: FilledButton.icon(
-                onPressed: _items.isEmpty ? null : _share,
-                icon: const Icon(Icons.share_outlined),
-                label: const Text('Share PDF'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    ),
+          ),
   );
 }
 
@@ -8137,7 +8373,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
         return;
       }
     }
-    Navigator.of(context).popUntil((route) => route.isFirst);
+    _returnToDashboard(context);
   }
 
   Future<void> _pickDate({required bool isDueDate}) async {
@@ -8345,6 +8581,13 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
               : 'Duplicate Invoice',
         ),
       ),
+      bottomNavigationBar: DesignSettings.modern.value && !_loadingSource
+          ? DocumentSaveBar(
+              saving: _isSavingDraft,
+              onClose: () => _saveDraft(openPreview: false),
+              onNext: () => _saveDraft(openPreview: true),
+            )
+          : null,
       body: _loadingSource
           ? const Center(child: CircularProgressIndicator())
           : Form(
@@ -8352,6 +8595,11 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
                 children: [
+                  if (DesignSettings.modern.value)
+                    const EditorSection(
+                      'Create your invoice',
+                      'Add a customer and items. Review before saving.',
+                    ),
                   _RecordAutocompleteField(
                     key: ValueKey(_customerListVersion),
                     controller: _customerController,
@@ -8404,7 +8652,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                     },
                   ),
                   const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
+                  SearchableStateField(
                     key: ValueKey(_placeOfSupplyController.text),
                     initialValue:
                         _indianStatesAndUnionTerritories.contains(
@@ -8526,51 +8774,54 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  TextField(
-                    controller: _termsController,
-                    minLines: 3,
-                    maxLines: 6,
-                    decoration: const InputDecoration(
-                      labelText: 'Terms and conditions',
-                      helperText:
-                          'Prefilled from Business Settings. Editable for this invoice.',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _isSavingDraft
-                              ? null
-                              : () => _saveDraft(openPreview: false),
-                          icon: const Icon(Icons.close_outlined),
-                          label: const Text('Save & Close'),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: FilledButton.icon(
-                          onPressed: _isSavingDraft
-                              ? null
-                              : () => _saveDraft(openPreview: true),
-                          icon: _isSavingDraft
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Icon(Icons.arrow_forward_outlined),
-                          label: Text(
-                            _isSavingDraft ? 'Saving...' : 'Save & Next',
+                  DesignSettings.modern.value
+                      ? EditableTerms(controller: _termsController)
+                      : TextField(
+                          controller: _termsController,
+                          minLines: 3,
+                          maxLines: 6,
+                          decoration: const InputDecoration(
+                            labelText: 'Terms and conditions',
+                            helperText:
+                                'Prefilled from Business Settings. Editable for this invoice.',
+                            border: OutlineInputBorder(),
                           ),
                         ),
-                      ),
-                    ],
-                  ),
+                  const SizedBox(height: 24),
+                  if (!DesignSettings.modern.value)
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _isSavingDraft
+                                ? null
+                                : () => _saveDraft(openPreview: false),
+                            icon: const Icon(Icons.close_outlined),
+                            label: const Text('Save & Close'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: _isSavingDraft
+                                ? null
+                                : () => _saveDraft(openPreview: true),
+                            icon: _isSavingDraft
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.arrow_forward_outlined),
+                            label: Text(
+                              _isSavingDraft ? 'Saving...' : 'Save & Next',
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                 ],
               ),
             ),
@@ -9099,38 +9350,44 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
       addNewLabel: 'Save & Add New Invoice',
       onAddNew: () => Navigator.of(context).pop(true),
     ),
-    bottomNavigationBar: SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _openWhatsApp,
-                icon: const Icon(Icons.chat_outlined),
-                label: const Text('WhatsApp'),
+    bottomNavigationBar: DesignSettings.modern.value
+        ? DocumentShareBar(
+            onWhatsApp: _openWhatsApp,
+            onEmail: _openEmail,
+            onShare: _sharePdf,
+          )
+        : SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _openWhatsApp,
+                      icon: const Icon(Icons.chat_outlined),
+                      label: const Text('WhatsApp'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _openEmail,
+                      icon: const Icon(Icons.email_outlined),
+                      label: const Text('Email'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _sharePdf,
+                      icon: const Icon(Icons.share_outlined),
+                      label: const Text('Share PDF'),
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _openEmail,
-                icon: const Icon(Icons.email_outlined),
-                label: const Text('Email'),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: FilledButton.icon(
-                onPressed: _sharePdf,
-                icon: const Icon(Icons.share_outlined),
-                label: const Text('Share PDF'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    ),
+          ),
   );
 }
 
@@ -9609,6 +9866,11 @@ class _AddProductPageState extends State<AddProductPage> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                if (DesignSettings.modern.value)
+                  const EditorSection(
+                    'Item details',
+                    'Set up an item once and reuse it in your documents.',
+                  ),
                 DropdownButtonFormField<String>(
                   initialValue: _itemType,
                   decoration: const InputDecoration(
@@ -10107,6 +10369,9 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      constraints: DesignSettings.modern.value
+          ? const BoxConstraints(maxWidth: 600)
+          : null,
       title: Text(_isEditing ? 'Edit Customer' : 'New Customer'),
       content: SingleChildScrollView(
         child: Form(
@@ -10236,7 +10501,7 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
+                SearchableStateField(
                   key: ValueKey(_state),
                   initialValue: _state,
                   isExpanded: true,
