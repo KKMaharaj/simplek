@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'document_defaults.dart';
+import 'payment_pdf.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -25,6 +27,26 @@ String _titleCase(String value) =>
       if (word.length <= 3 && word == word.toUpperCase()) return word;
       return '${word[0].toUpperCase()}${word.substring(1).toLowerCase()}';
     });
+
+Future<void> showGstinResult(BuildContext context, String message) async {
+  final navigator = Navigator.of(context, rootNavigator: true);
+  final route = DialogRoute<void>(
+    context: context,
+    builder: (_) => AlertDialog(
+      title: const Text('GSTIN verification'),
+      content: SingleChildScrollView(child: Text(message)),
+    ),
+  );
+  final completion = navigator.push(route);
+  final timer = Timer(const Duration(seconds: 2), () {
+    if (route.isActive) navigator.removeRoute(route);
+  });
+  try {
+    await completion;
+  } finally {
+    timer.cancel();
+  }
+}
 
 class _TitleCaseFormatter extends TextInputFormatter {
   @override
@@ -781,55 +803,74 @@ class MyApp extends StatelessWidget {
       seedColor: const Color(0xFF3157A4),
       brightness: Brightness.light,
     );
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Simplek',
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: colorScheme,
-        scaffoldBackgroundColor: const Color(0xFFF6F7FB),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFFF6F7FB),
-          surfaceTintColor: Colors.transparent,
-          centerTitle: false,
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: Colors.white,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 16,
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: BusinessSettings.themeMode,
+      builder: (context, mode, _) => MaterialApp(
+        themeMode: mode,
+        darkTheme: ThemeData(
+          useMaterial3: true,
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: const Color(0xFF3157A4),
+            brightness: Brightness.dark,
           ),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: colorScheme.outlineVariant),
+          inputDecorationTheme: InputDecorationTheme(
+            filled: true,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            contentPadding: const EdgeInsets.all(16),
+          ),
+          filledButtonTheme: FilledButtonThemeData(
+            style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
           ),
         ),
-        cardTheme: CardThemeData(
-          elevation: 0,
-          color: Colors.white,
-          margin: EdgeInsets.zero,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: colorScheme.outlineVariant),
+        debugShowCheckedModeBanner: false,
+        title: 'Simplek',
+        theme: ThemeData(
+          useMaterial3: true,
+          colorScheme: colorScheme,
+          scaffoldBackgroundColor: const Color(0xFFF6F7FB),
+          appBarTheme: const AppBarTheme(
+            backgroundColor: Color(0xFFF6F7FB),
+            surfaceTintColor: Colors.transparent,
+            centerTitle: false,
           ),
-        ),
-        filledButtonTheme: FilledButtonThemeData(
-          style: FilledButton.styleFrom(
-            minimumSize: const Size(48, 52),
-            shape: RoundedRectangleBorder(
+          inputDecorationTheme: InputDecorationTheme(
+            filled: true,
+            fillColor: Colors.white,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 16,
+            ),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: colorScheme.outlineVariant),
+            ),
+          ),
+          cardTheme: CardThemeData(
+            elevation: 0,
+            color: Colors.white,
+            margin: EdgeInsets.zero,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: BorderSide(color: colorScheme.outlineVariant),
+            ),
+          ),
+          filledButtonTheme: FilledButtonThemeData(
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(48, 52),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+          floatingActionButtonTheme: FloatingActionButtonThemeData(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
             ),
           ),
         ),
-        floatingActionButtonTheme: FloatingActionButtonThemeData(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-        ),
+        home: home ?? const AppLaunchSplash(),
       ),
-      home: home ?? const AppLaunchSplash(),
     );
   }
 }
@@ -844,7 +885,7 @@ class _AppLaunchSplashState extends State<AppLaunchSplash> {
   @override
   void initState() {
     super.initState();
-    Future<void>.delayed(const Duration(milliseconds: 1600), () {
+    Future<void>.delayed(const Duration(milliseconds: 2600), () {
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         PageRouteBuilder<void>(
@@ -869,12 +910,6 @@ class _AppLaunchSplashState extends State<AppLaunchSplash> {
           const Text(
             'Invoicing made easy',
             style: TextStyle(fontSize: 17, color: Color(0xFF193A73)),
-          ),
-          const SizedBox(height: 32),
-          const SizedBox(
-            width: 24,
-            height: 24,
-            child: CircularProgressIndicator(strokeWidth: 2.4),
           ),
         ],
       ),
@@ -1634,16 +1669,8 @@ class BusinessOnboardingPage extends StatefulWidget {
 }
 
 class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
-  static const _standardQuotationTerms =
-      '1. This quotation is valid for 30 days from the date of issue.\n'
-      '2. Prices and availability are subject to confirmation.\n'
-      '3. Taxes will be charged as applicable.\n'
-      '4. Work or supply begins after written acceptance.';
-  static const _standardInvoiceTerms =
-      '1. Payment is due by the due date shown on the invoice.\n'
-      '2. Please mention the invoice number with every payment.\n'
-      '3. Goods once sold will not be returned unless agreed in writing.\n'
-      '4. Subject to local jurisdiction.';
+  static const _standardQuotationTerms = DocumentDefaults.quotation;
+  static const _standardInvoiceTerms = DocumentDefaults.invoice;
 
   final _detailsKey = GlobalKey<FormState>();
   final _termsKey = GlobalKey<FormState>();
@@ -1745,9 +1772,7 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
     if (!RegExp(
       r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$',
     ).hasMatch(gstin)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a valid 15-character GSTIN.')),
-      );
+      await showGstinResult(context, 'Enter a valid 15-character GSTIN.');
       return;
     }
     setState(() => _verifying = true);
@@ -1779,19 +1804,16 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
         if (address.isNotEmpty) _addressController.text = _titleCase(address);
         _gstVerified = true;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('GSTIN verified: ${data['status'] ?? 'active'}'),
-        ),
+      await showGstinResult(
+        context,
+        'GSTIN verified: ${data['status'] ?? 'active'}',
       );
     } catch (error) {
       if (mounted) {
         final message = error is FunctionException && error.details is Map
             ? error.details['error']?.toString() ?? 'GSTIN verification failed.'
             : error.toString().replaceFirst('Exception: ', '');
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(message)));
+        await showGstinResult(context, message);
       }
     } finally {
       if (mounted) setState(() => _verifying = false);
@@ -2717,11 +2739,10 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Colors.white,
         elevation: 0,
-        title: const Text(
-          'Simplek',
-          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black87),
+        title: const FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text('Simplek', style: TextStyle(fontWeight: FontWeight.bold)),
         ),
         actions: [
           IconButton(
@@ -2737,11 +2758,12 @@ class _DashboardPageState extends State<DashboardPage> {
             icon: const Icon(Icons.refresh),
           ),
           IconButton(
-            onPressed: () {},
-            icon: const Icon(Icons.notifications_outlined),
-          ),
-          IconButton(
-            onPressed: () {},
+            tooltip: 'Settings',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const BusinessSettingsPage(),
+              ),
+            ),
             icon: const Icon(Icons.settings_outlined),
           ),
           const SizedBox(width: 8),
@@ -3013,7 +3035,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(28),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: Theme.of(context).colorScheme.surface,
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: Column(
@@ -3117,7 +3139,7 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  static Widget _summaryCard({
+  Widget _summaryCard({
     required String title,
     required String value,
     required IconData icon,
@@ -3126,7 +3148,7 @@ class _DashboardPageState extends State<DashboardPage> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
@@ -3148,7 +3170,7 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  static Widget _actionButton({
+  Widget _actionButton({
     required IconData icon,
     required String title,
     required Color color,
@@ -3160,7 +3182,7 @@ class _DashboardPageState extends State<DashboardPage> {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 12),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(14),
         ),
         child: Column(
@@ -3645,6 +3667,14 @@ class _CustomerHistoryPageState extends State<CustomerHistoryPage> {
 }
 
 class BusinessSettings {
+  static final themeMode = ValueNotifier(ThemeMode.system);
+
+  static Future<void> setThemeMode(ThemeMode mode) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString('app_theme_mode', mode.name);
+    themeMode.value = mode;
+  }
+
   static const _secureStorage = FlutterSecureStorage();
   static const _gstRegisteredKey = 'business_gst_registered';
   static const _defaultDueDayKey = 'business_default_due_day';
@@ -3760,6 +3790,10 @@ class BusinessSettings {
 
   static Future<void> load() async {
     final preferences = await SharedPreferences.getInstance();
+    themeMode.value = ThemeMode.values.firstWhere(
+      (mode) => mode.name == preferences.getString('app_theme_mode'),
+      orElse: () => ThemeMode.system,
+    );
     final protectedValues = await Future.wait([
       _readProtected(preferences, _businessGstinKey),
       _readProtected(preferences, _bankNameKey),
@@ -3772,10 +3806,14 @@ class BusinessSettings {
     isGstRegistered.value = preferences.getBool(_gstRegisteredKey) ?? false;
     defaultDueDay.value = preferences.getInt(_defaultDueDayKey) ?? 7;
     defaultTerms.value = preferences.getString(_defaultTermsKey) ?? '';
-    quotationTerms.value =
-        preferences.getString(_quotationTermsKey) ?? defaultTerms.value;
-    invoiceTerms.value =
-        preferences.getString(_invoiceTermsKey) ?? defaultTerms.value;
+    quotationTerms.value = DocumentDefaults.resolve(
+      preferences.getString(_quotationTermsKey) ?? defaultTerms.value,
+      isQuotation: true,
+    );
+    invoiceTerms.value = DocumentDefaults.resolve(
+      preferences.getString(_invoiceTermsKey) ?? defaultTerms.value,
+      isQuotation: false,
+    );
     profile.value = {
       'ownerName': preferences.getString(_ownerNameKey) ?? '',
       'name': preferences.getString(_businessNameKey) ?? '',
@@ -3814,8 +3852,14 @@ class BusinessSettings {
       if (row == null) return;
       isGstRegistered.value = row['gst_registered'] == true;
       defaultDueDay.value = row['default_due_day'] as int? ?? 7;
-      quotationTerms.value = row['quotation_terms']?.toString() ?? '';
-      invoiceTerms.value = row['invoice_terms']?.toString() ?? '';
+      quotationTerms.value = DocumentDefaults.resolve(
+        row['quotation_terms']?.toString(),
+        isQuotation: true,
+      );
+      invoiceTerms.value = DocumentDefaults.resolve(
+        row['invoice_terms']?.toString(),
+        isQuotation: false,
+      );
       final localMedia = profile.value;
       final logoPath = await _downloadBusinessMedia(
         row['logo_object_path']?.toString() ?? '',
@@ -4416,6 +4460,37 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                ValueListenableBuilder<ThemeMode>(
+                  valueListenable: BusinessSettings.themeMode,
+                  builder: (context, mode, _) =>
+                      DropdownButtonFormField<ThemeMode>(
+                        initialValue: mode,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Appearance',
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: ThemeMode.system,
+                            child: Text('System default'),
+                          ),
+                          DropdownMenuItem(
+                            value: ThemeMode.light,
+                            child: Text('Light'),
+                          ),
+                          DropdownMenuItem(
+                            value: ThemeMode.dark,
+                            child: Text('Dark'),
+                          ),
+                        ],
+                        onChanged: (value) async {
+                          if (value != null) {
+                            await BusinessSettings.setThemeMode(value);
+                          }
+                        },
+                      ),
+                ),
+                const SizedBox(height: 24),
                 Text(
                   'Business details',
                   style: Theme.of(context).textTheme.titleLarge,
@@ -7171,6 +7246,7 @@ class _QuotationPreviewPageState extends State<QuotationPreviewPage> {
 
   Future<Uint8List> _pdf(PdfPageFormat format) async {
     final profile = BusinessSettings.profile.value;
+    final paymentQr = await buildPaymentQr(profile);
     final pdf = pw.Document();
     pdf.addPage(
       pw.MultiPage(
@@ -7268,6 +7344,7 @@ class _QuotationPreviewPageState extends State<QuotationPreviewPage> {
             ),
             pw.Text(widget.quotation['terms'].toString()),
           ],
+          if (paymentQr != null) ...[pw.SizedBox(height: 20), paymentQr],
           pw.SizedBox(height: 28),
           pw.Align(
             alignment: pw.Alignment.center,
@@ -8778,24 +8855,11 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
     return pw.MemoryImage(await File(path).readAsBytes());
   }
 
-  Future<pw.MemoryImage?> _paymentQr(Map<String, String> profile) async {
-    final upiId = profile['upiId'] ?? '';
-    if (!_isValidUpiId(upiId)) return _image(profile['qrPath']);
-    final painter = QrPainter(
-      data: _upiPaymentUri(upiId, profile['name'] ?? ''),
-      version: QrVersions.auto,
-      errorCorrectionLevel: QrErrorCorrectLevel.M,
-      gapless: true,
-    );
-    final data = await painter.toImageData(400, format: ui.ImageByteFormat.png);
-    return data == null ? null : pw.MemoryImage(data.buffer.asUint8List());
-  }
-
   Future<Uint8List> _generatePdf(PdfPageFormat format) async {
     final profile = BusinessSettings.profile.value;
     final logo = await _image(profile['logoPath']);
     final signature = await _image(profile['signaturePath']);
-    final qr = await _paymentQr(profile);
+    final qr = await buildPaymentQr(profile);
     final pdf = pw.Document();
     pdf.addPage(
       pw.MultiPage(
@@ -8934,14 +8998,7 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
             crossAxisAlignment: pw.CrossAxisAlignment.end,
             children: [
-              if (qr != null)
-                pw.Container(
-                  width: 76,
-                  height: 76,
-                  child: pw.Image(qr, fit: pw.BoxFit.contain),
-                )
-              else
-                pw.SizedBox(),
+              qr ?? pw.SizedBox(),
               pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.center,
                 children: [
@@ -9995,10 +10052,9 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
     final gstin = _gstinController.text.trim().toUpperCase();
     final format = RegExp(r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$');
     if (!format.hasMatch(gstin)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Enter a valid GSTIN before verification.'),
-        ),
+      await showGstinResult(
+        context,
+        'Enter a valid GSTIN before verification.',
       );
       return;
     }
@@ -10031,21 +10087,16 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
         final address = data['address']?.toString().trim() ?? '';
         if (address.isNotEmpty) _addressController.text = _titleCase(address);
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'GSTIN verified: ${data['status'] ?? 'status unavailable'}',
-          ),
-        ),
+      await showGstinResult(
+        context,
+        'GSTIN verified: ${data['status'] ?? 'status unavailable'}',
       );
     } catch (e) {
       if (mounted) {
         final message = e is FunctionException && e.details is Map
             ? (e.details['error']?.toString() ?? 'GSTIN verification failed.')
             : e.toString().replaceFirst('Exception: ', '');
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(message)));
+        await showGstinResult(context, message);
       }
     } finally {
       if (mounted) setState(() => _isLookingUpGstin = false);
