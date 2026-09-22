@@ -1,6 +1,6 @@
 # Simplek - Project Tracker
 
-Last updated: 2026-09-01
+Last updated: 2026-09-22
 
 This tracker maps the Software Requirements Document (SRD) to the current
 implementation. Update the status and notes whenever a feature changes.
@@ -111,6 +111,26 @@ implementation. Update the status and notes whenever a feature changes.
 1. Provide `GSTINAPI_KEY` to deploy and activate the GSTIN lookup Edge Function.
 2. Add `simplek://login-callback/` in Supabase Auth URL Configuration using a dashboard role with Auth configuration access.
 3. Run the iOS build on macOS/Xcode.
+4. The requested fresh-start reset and creation of a separate test account are
+   pending Supabase administrator sign-in. On 2026-09-22, both browser sessions
+   were signed out and no administrator credentials were available in the
+   workspace. No accounts or billing data have been deleted.
+
+## September 22 invoice improvements
+
+- Five invoice palettes: white/red, white/blue, cream/blue, light yellow/blue,
+  and white/dark green. The choice is stored in authenticated user metadata
+  and cached under a user-specific key. No new database migration is needed.
+- Business Settings previews the actual PDF using unsaved profile values and
+  sample items; preview mode cannot save or share sample invoices.
+- WhatsApp offers a client chat with an encoded prefilled message, targeted
+  PDF attachment sharing, and message copying. Attachment sharing still
+  requires selecting the recipient in WhatsApp; document captions depend on
+  WhatsApp. Removed the unsupported recipient `jid` intent dependency.
+- All 17 tests passed, including five multi-page PDF generations and phone /
+  message normalization. All ten rendered sample PDF pages were inspected.
+- Final on-phone WhatsApp testing remains pending: no Android device was
+  connected during this change.
 
 ## Next implementation milestone
 

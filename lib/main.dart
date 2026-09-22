@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'document_defaults.dart';
+import 'invoice_palette.dart';
+import 'whatsapp_contact.dart';
 import 'payment_pdf.dart';
 import 'modern_ui.dart';
 import 'dart:convert';
@@ -3880,6 +3882,10 @@ class _CustomerHistoryPageState extends State<CustomerHistoryPage> {
 }
 
 class BusinessSettings {
+  static String get _invoiceThemeCacheKey {
+    final user = Supabase.instance.client.auth.currentUser;
+    return 'business_invoice_theme_${user?.id ?? 'signed_out'}';
+  }
   static final themeMode = ValueNotifier(ThemeMode.system);
 
   static Future<void> setThemeMode(ThemeMode mode) async {
@@ -4049,6 +4055,7 @@ class BusinessSettings {
       'placeOfSupply': preferences.getString(_placeOfSupplyKey) ?? '',
       'financialYear': preferences.getString(_financialYearKey) ?? '',
       'invoicePrefix': preferences.getString(_invoicePrefixKey) ?? 'INV',
+      'invoiceTheme': preferences.getString(_invoiceThemeCacheKey) ?? 'white-blue',
       'quotationPrefix': preferences.getString(_quotationPrefixKey) ?? 'QTN',
     };
   }
@@ -4108,6 +4115,7 @@ class BusinessSettings {
         'placeOfSupply': row['place_of_supply']?.toString() ?? '',
         'financialYear': row['financial_year']?.toString() ?? '',
         'invoicePrefix': row['invoice_prefix']?.toString() ?? 'INV',
+        'invoiceTheme': InvoicePalette.resolve(user.userMetadata?['invoice_theme']?.toString()).id,
         'quotationPrefix': row['quotation_prefix']?.toString() ?? 'QTN',
         'logoPath': logoPath,
         'signaturePath': signaturePath,
@@ -4380,11 +4388,15 @@ class BusinessSettings {
       'qr_object_path': mediaPaths[2],
       'updated_at': DateTime.now().toUtc().toIso8601String(),
     });
+    await Supabase.instance.client.auth.updateUser(UserAttributes(data: {
+      'invoice_theme': InvoicePalette.resolve(value['invoiceTheme']).id,
+    }));
   }
 
   static Future<void> _saveLocalProfile(Map<String, String> value) async {
     profile.value = value;
     final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(_invoiceThemeCacheKey, InvoicePalette.resolve(value['invoiceTheme']).id);
     await preferences.setString(_ownerNameKey, value['ownerName'] ?? '');
     await preferences.setString(_businessNameKey, value['name'] ?? '');
     await preferences.setString(_businessAddressKey, value['address'] ?? '');
@@ -4446,7 +4458,38 @@ class BusinessSettingsPage extends StatefulWidget {
 }
 
 class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
+  Future<void> _previewInvoiceTheme() async {
+    final sample = InvoiceLineItem();
+    sample.productController.text = 'Sample product';
+    sample.quantityController.text = '2';
+    sample.rateController.text = '500';
+    sample.gstRateController.text = '18';
+    final previewProfile = <String, String>{
+      ...BusinessSettings.profile.value,
+      'name': _nameController.text.trim(),
+      'address': _addressController.text.trim(),
+      'phone': _phoneController.text.trim(), 'email': _emailController.text.trim(),
+      'gstin': _gstinController.text.trim(),
+      'bankName': _bankNameController.text.trim(), 'bankBranch': _branchController.text.trim(),
+      'bankAccount': _accountController.text.trim(), 'ifsc': _ifscController.text.trim(),
+      'upiId': _upiController.text.trim(),
+      'logoPath': _logoPath, 'signaturePath': _signaturePath, 'qrPath': _qrPath,
+      'businessState': _stateController.text.trim(), 'invoiceTheme': _invoiceTheme,
+    };
+    try {
+      await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => InvoicePreviewPage(
+        customerName: 'Sample Customer', customerPhone: '', customerEmail: '',
+        placeOfSupply: _stateController.text.trim(), invoiceDate: DateTime.now(),
+        dueDate: DateTime.now().add(const Duration(days: 7)),
+        terms: _invoiceTermsController.text, items: [sample],
+        invoiceNumber: 'SAMPLE-001', balanceDue: 1180,
+        previewProfile: previewProfile,
+      )));
+    } finally { sample.dispose(); }
+  }
+
   final _formKey = GlobalKey<FormState>();
+  late String _invoiceTheme;
   late final TextEditingController _quotationTermsController;
   late final TextEditingController _invoiceTermsController;
   late final TextEditingController _ownerController;
@@ -4484,6 +4527,7 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
       text: BusinessSettings.invoiceTerms.value,
     );
     final profile = BusinessSettings.profile.value;
+    _invoiceTheme = InvoicePalette.resolve(profile['invoiceTheme']).id;
     _ownerController = TextEditingController(text: profile['ownerName']);
     _nameController = TextEditingController(text: profile['name']);
     _addressController = TextEditingController(text: profile['address']);
@@ -4591,6 +4635,7 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
       'financialYear': _financialYearController.text.trim(),
       'invoicePrefix': _invoicePrefixController.text.trim().toUpperCase(),
       'quotationPrefix': _quotationPrefixController.text.trim().toUpperCase(),
+      'invoiceTheme': _invoiceTheme,
     });
     if (!mounted) return;
     ScaffoldMessenger.of(
@@ -4705,6 +4750,22 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
                         },
                       ),
                 ),
+                const SizedBox(height: 24),
+                Text(
+                  'Invoice colours',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 12),
+                Wrap(spacing: 8, runSpacing: 8, children: InvoicePalette.options.map((palette) => ChoiceChip(
+                  label: Text(palette.label),
+                  avatar: CircleAvatar(backgroundColor: palette.inkColor, child: Icon(Icons.receipt_outlined, color: palette.paperColor, size: 18)),
+                  selected: _invoiceTheme == palette.id,
+                  onSelected: (_) => setState(() => _invoiceTheme = palette.id),
+                )).toList()),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(onPressed: _previewInvoiceTheme,
+                  icon: const Icon(Icons.preview_outlined), label: const Text('Preview invoice format')),
+                const Text('Save business profile to use this format for your invoices.'),
                 const SizedBox(height: 24),
                 Text(
                   'Business details',
@@ -9022,6 +9083,7 @@ class InvoicePreviewPage extends StatefulWidget {
     required this.items,
     required this.invoiceNumber,
     required this.balanceDue,
+    this.previewProfile,
   });
 
   final String customerName;
@@ -9034,12 +9096,16 @@ class InvoicePreviewPage extends StatefulWidget {
   final List<InvoiceLineItem> items;
   final String invoiceNumber;
   final double balanceDue;
+  final Map<String, String>? previewProfile;
 
   @override
   State<InvoicePreviewPage> createState() => _InvoicePreviewPageState();
 }
 
-class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
+class InvoicePdfRenderer {
+  InvoicePdfRenderer(this.widget);
+  final InvoicePreviewPage widget;
+  Map<String, String> get _profile => widget.previewProfile ?? BusinessSettings.profile.value;
   double get _subtotal =>
       widget.items.fold(0, (sum, item) => sum + item.taxableAmount);
   double get _taxTotal =>
@@ -9047,7 +9113,7 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
   double get _total => _subtotal + _taxTotal;
   bool get _isIntraState =>
       _normaliseState(widget.placeOfSupply) ==
-      _normaliseState(BusinessSettings.profile.value['businessState'] ?? '');
+      _normaliseState(_profile['businessState'] ?? '');
   double get _cgstTotal => _isIntraState ? _taxTotal / 2 : 0;
   double get _sgstTotal => _isIntraState ? _taxTotal / 2 : 0;
   double get _igstTotal => _isIntraState ? 0 : _taxTotal;
@@ -9056,66 +9122,28 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
   String _date(DateTime? value) => value == null
       ? '-'
       : '${value.day.toString().padLeft(2, '0')}/${value.month.toString().padLeft(2, '0')}/${value.year}';
-  String get _message =>
-      'Hello ${widget.customerName}, here is the invoice ($_invoiceNumber) from '
-      '${BusinessSettings.profile.value['name'] ?? ''}. Please make the payment of '
-      'rupees ${widget.balanceDue.toStringAsFixed(2)} to the payment details as mentioned '
-      'in the invoice. If you need any further assistance, please contact us '
-      '${BusinessSettings.profile.value['phone'] ?? ''} or '
-      '${BusinessSettings.profile.value['email'] ?? ''}. Thank you';
-
-  String get _emailMessage =>
-      'Hello ${widget.customerName}. Please find attached invoice, $_invoiceNumber '
-      'for your reference. Kindly make the payment to the bank details mentioned '
-      'in the invoice. If you have any queries, please feel free to contact us.';
-
-  Future<void> _sendAttachment(String target, String recipient) async {
-    try {
-      final bytes = await _generatePdf(PdfPageFormat.a4);
-      if (Platform.isAndroid) {
-        await const MethodChannel(
-          'simplek/document_share',
-        ).invokeMethod('share', {
-          'bytes': bytes,
-          'filename':
-              'invoice_${_invoiceNumber.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_')}.pdf',
-          'target': target,
-          'recipient': recipient,
-          'subject': 'Invoice $_invoiceNumber',
-          'body': target == 'email' ? _emailMessage : _message,
-        });
-      } else {
-        await Printing.sharePdf(
-          bytes: bytes,
-          filename: 'invoice.pdf',
-          subject: 'Invoice $_invoiceNumber',
-          body: target == 'email' ? _emailMessage : _message,
-        );
-      }
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Unable to attach invoice: $error')),
-        );
-      }
-    }
-  }
-
   Future<pw.MemoryImage?> _image(String? path) async {
     if (path == null || path.isEmpty || !await File(path).exists()) return null;
     return pw.MemoryImage(await File(path).readAsBytes());
   }
 
-  Future<Uint8List> _generatePdf(PdfPageFormat format) async {
-    final profile = BusinessSettings.profile.value;
+  Future<Uint8List> build(PdfPageFormat format) async {
+    final profile = _profile;
+    final palette = InvoicePalette.resolve(profile['invoiceTheme']);
     final logo = await _image(profile['logoPath']);
     final signature = await _image(profile['signaturePath']);
     final qr = await buildPaymentQr(profile);
     final pdf = pw.Document();
     pdf.addPage(
       pw.MultiPage(
-        pageFormat: format,
-        margin: const pw.EdgeInsets.all(28),
+        pageTheme: pw.PageTheme(
+          pageFormat: format, margin: const pw.EdgeInsets.all(28),
+          theme: pw.ThemeData.withFont().copyWith(
+            defaultTextStyle: pw.TextStyle(color: palette.pdfInk, fontSize: 10),
+          ),
+          buildBackground: (_) => pw.FullPage(ignoreMargins: true,
+            child: pw.Container(color: palette.pdfPaper)),
+        ),
         build: (_) => [
           pw.Row(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -9155,7 +9183,8 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
                 ),
               ),
               pw.Text(
-                'TAX INVOICE',
+                widget.previewProfile != null ? 'SAMPLE INVOICE' :
+                    (BusinessSettings.isGstRegistered.value ? 'TAX INVOICE' : 'INVOICE'),
                 style: pw.TextStyle(
                   fontSize: 18,
                   fontWeight: pw.FontWeight.bold,
@@ -9166,7 +9195,7 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
           pw.SizedBox(height: 20),
           pw.Container(
             padding: const pw.EdgeInsets.all(10),
-            color: PdfColors.grey100,
+            color: palette.pdfPaper,
             child: pw.Row(
               children: [
                 pw.Expanded(
@@ -9187,9 +9216,9 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
           pw.TableHelper.fromTextArray(
             headerStyle: pw.TextStyle(
               fontWeight: pw.FontWeight.bold,
-              color: PdfColors.white,
+              color: palette.pdfPaper,
             ),
-            headerDecoration: const pw.BoxDecoration(color: PdfColors.indigo),
+            headerDecoration: pw.BoxDecoration(color: palette.pdfInk),
             cellAlignment: pw.Alignment.centerLeft,
             headers: const ['#', 'Description', 'Qty', 'Rate', 'GST', 'Amount'],
             data: List.generate(widget.items.length, (index) {
@@ -9301,6 +9330,57 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
         ),
       );
 
+}
+
+class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
+  String get _invoiceNumber => widget.invoiceNumber;
+  String get _message =>
+      'Hello ${widget.customerName}, here is the invoice ($_invoiceNumber) from '
+      '${BusinessSettings.profile.value['name'] ?? ''}. Please make the payment of '
+      'rupees ${widget.balanceDue.toStringAsFixed(2)} to the payment details as mentioned '
+      'in the invoice. If you need any further assistance, please contact us '
+      '${BusinessSettings.profile.value['phone'] ?? ''} or '
+      '${BusinessSettings.profile.value['email'] ?? ''}. Thank you';
+
+  String get _emailMessage =>
+      'Hello ${widget.customerName}. Please find attached invoice, $_invoiceNumber '
+      'for your reference. Kindly make the payment to the bank details mentioned '
+      'in the invoice. If you have any queries, please feel free to contact us.';
+
+  Future<void> _sendAttachment(String target, String recipient) async {
+    try {
+      final bytes = await _generatePdf(PdfPageFormat.a4);
+      if (Platform.isAndroid) {
+        await const MethodChannel(
+          'simplek/document_share',
+        ).invokeMethod('share', {
+          'bytes': bytes,
+          'filename':
+              'invoice_${_invoiceNumber.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_')}.pdf',
+          'target': target,
+          'recipient': recipient,
+          'subject': 'Invoice $_invoiceNumber',
+          'body': target == 'email' ? _emailMessage : _message,
+        });
+      } else {
+        await Printing.sharePdf(
+          bytes: bytes,
+          filename: 'invoice.pdf',
+          subject: 'Invoice $_invoiceNumber',
+          body: target == 'email' ? _emailMessage : _message,
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to attach invoice: $error')),
+        );
+      }
+    }
+  }
+
+  Future<Uint8List> _generatePdf(PdfPageFormat format) => InvoicePdfRenderer(widget).build(format);
+
   Future<void> _sharePdf() async {
     final bytes = await _generatePdf(PdfPageFormat.a4);
     await Printing.sharePdf(
@@ -9312,16 +9392,52 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
   }
 
   Future<void> _openWhatsApp() async {
-    final phone = widget.customerPhone.replaceAll(RegExp(r'[^0-9]'), '');
-    if (phone.isEmpty) {
+    final phone = whatsappNumber(widget.customerPhone);
+    if (phone == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Add the customer WhatsApp number first.'),
+          content: Text('Enter a valid customer WhatsApp number, including country code for international numbers.'),
         ),
       );
       return;
     }
-    await _sendAttachment('whatsapp', phone.length == 10 ? '91$phone' : phone);
+    final action = await showModalBottomSheet<String>(context: context,
+      builder: (context) => SafeArea(child: SingleChildScrollView(child: Padding(
+        padding: const EdgeInsets.all(20), child: Column(mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('WhatsApp: ${widget.customerName}', style: Theme.of(context).textTheme.titleLarge),
+            Text('+$phone'), const SizedBox(height: 12),
+            const Text('Open the client chat with the message filled in, or share the PDF and select the client. WhatsApp may omit the caption when sharing a document; use Copy message if needed.'),
+            const SizedBox(height: 12), SelectableText(_message),
+            ListTile(leading: const Icon(Icons.chat_outlined), title: const Text('Open client chat with message'),
+              onTap: () => Navigator.pop(context, 'chat')),
+            ListTile(leading: const Icon(Icons.picture_as_pdf_outlined), title: const Text('Share PDF to WhatsApp'),
+              onTap: () => Navigator.pop(context, 'pdf')),
+            ListTile(leading: const Icon(Icons.copy_outlined), title: const Text('Copy message'),
+              onTap: () => Navigator.pop(context, 'copy')),
+          ]),
+      ))));
+    if (!mounted || action == null) return;
+    try {
+      if (action == 'pdf') {
+        await Clipboard.setData(ClipboardData(text: _message));
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Message copied. Select the client in WhatsApp and paste it if the caption is empty.')));
+        await _sendAttachment('whatsapp', phone);
+      } else if (action == 'copy') {
+        await Clipboard.setData(ClipboardData(text: _message));
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Message copied')));
+      } else {
+        final uri = whatsappChatUri(phone, _message);
+        if (Platform.isAndroid) {
+          await const MethodChannel('simplek/document_share').invokeMethod('openChat', {'url': uri.toString()});
+        } else if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+          throw StateError('WhatsApp could not be opened.');
+        }
+      }
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Unable to open WhatsApp: $error')));
+    }
   }
 
   Future<void> _openEmail() async {
@@ -9337,7 +9453,7 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: const Text('Invoice Preview'),
+      title: Text(widget.previewProfile != null ? 'Sample invoice format' : 'Invoice Preview'),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),
@@ -9345,12 +9461,15 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
         ),
       ],
     ),
-    body: _SavedDocumentPreview(
+    body: widget.previewProfile != null
+        ? PdfPreview(build: _generatePdf, canChangePageFormat: false,
+            canChangeOrientation: false, allowPrinting: false, allowSharing: false)
+        : _SavedDocumentPreview(
       buildPdf: _generatePdf,
       addNewLabel: 'Save & Add New Invoice',
       onAddNew: () => Navigator.of(context).pop(true),
     ),
-    bottomNavigationBar: DesignSettings.modern.value
+    bottomNavigationBar: widget.previewProfile != null ? null : DesignSettings.modern.value
         ? DocumentShareBar(
             onWhatsApp: _openWhatsApp,
             onEmail: _openEmail,
