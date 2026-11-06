@@ -140,3 +140,20 @@ limited to the external blockers above and the low-risk architectural file split
 Security and media migrations through `20260901_quotation_rls.sql`,
 `20260901_business_media_storage.sql`, and `20260904_invoice_rls.sql` were
 applied to the live project by 2026-09-04.
+
+## November 6 payment and invoice-save fixes
+
+- **Deploy order:** apply `20261106_atomic_invoice_payment_saves.sql` before
+  shipping this app version. The new app cannot save invoices without it; older
+  app versions keep working after it is applied.
+- `record_invoice_payment` now checks invoice ownership, is closed to `anon`,
+  and ignores a repeated `client_request_id`.
+- `save_invoice` and `convert_quotation_to_invoice` run as one transaction, so a
+  failure leaves no partial document and uses no number. Retrying a create with
+  the same invoice id returns the saved invoice.
+- Offline queues (`lib/offline_queue.dart`) keep items added during a sync, send
+  each item once, and set aside items the server refuses, telling the user.
+  Offline payments keep the date they were recorded.
+- `supabase/tests/20261106_atomic_saves_regressions.sql` passed on a local
+  Postgres built from the migrations. It has not been run on the live project,
+  and these flows have not been tried on a device.

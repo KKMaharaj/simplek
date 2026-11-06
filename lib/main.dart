@@ -6,6 +6,7 @@ import 'invoice_palette.dart';
 import 'whatsapp_contact.dart';
 import 'payment_pdf.dart';
 import 'modern_ui.dart';
+import 'offline_queue.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -157,6 +158,45 @@ bool _isOfflineError(Object error) {
       message.contains('connection refused') ||
       message.contains('connection reset') ||
       message.contains('clientexception');
+}
+
+/// Tells the user about queued work the server refused, which will not retry.
+Future<void> _showSyncRejections(
+  BuildContext context,
+  String name,
+  String Function(Map<String, dynamic> item) describe,
+) async {
+  if (!context.mounted) return;
+  final rejected = await OfflineStore.takeRejected(name);
+  if (rejected.isEmpty || !context.mounted) return;
+  await showDialog<void>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Some offline changes were not saved'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final entry in rejected)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  '${describe(Map<String, dynamic>.from(entry['item'] as Map))}\n'
+                  '${entry['reason']}',
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: const Text('OK'),
+        ),
+      ],
+    ),
+  );
 }
 
 Future<Map<String, dynamic>?> _showSearchableRecordPicker(
@@ -554,39 +594,31 @@ class OfflineStore {
     await writeList(name, rows);
   }
 
-  static Future<void> enqueue(String name, Map<String, dynamic> payload) async {
-    final queue = await readList('${name}_queue');
-    final queued = Map<String, dynamic>.from(payload);
-    final identity = queued['id'] ?? queued['_queue_id'] ?? const Uuid().v4();
-    if (queued['id'] == null) queued['_queue_id'] = identity;
-    queue.removeWhere((item) => (item['id'] ?? item['_queue_id']) == identity);
-    queue.add(queued);
-    await writeList('${name}_queue', queue);
-  }
+  static Future<void> enqueue(String name, Map<String, dynamic> payload) =>
+      OfflineQueue.add(_key('${name}_queue'), payload);
+
+  /// Items the server refused during sync, cleared once returned.
+  static Future<List<Map<String, dynamic>>> takeRejected(String name) =>
+      OfflineQueue.takeRejected(_key('${name}_rejected'));
+
+  static Future<int> _drain(
+    String name,
+    Future<void> Function(Map<String, dynamic> item) send,
+  ) => OfflineQueue.drain(
+    key: _key('${name}_queue'),
+    rejectedKey: _key('${name}_rejected'),
+    send: send,
+  );
 
   static Future<int> flush(String table, String name) async {
-    final queue = await readList('${name}_queue');
-    if (queue.isEmpty) return 0;
-    var synced = 0;
-    final remaining = <Map<String, dynamic>>[];
-    for (var index = 0; index < queue.length; index++) {
-      final payload = queue[index];
+    final synced = await _drain(name, (payload) async {
       try {
         await Supabase.instance.client.from(table).insert(payload);
-        synced++;
       } on PostgrestException catch (error) {
-        if (error.code == '23505') {
-          synced++;
-        } else {
-          remaining.addAll(queue.skip(index));
-          break;
-        }
-      } catch (_) {
-        remaining.addAll(queue.skip(index));
-        break;
+        // Already saved by an earlier attempt.
+        if (error.code != '23505') rethrow;
       }
-    }
-    await writeList('${name}_queue', remaining);
+    });
     if (synced > 0 && (name == 'customers' || name == 'products')) {
       invoiceChanges.value++;
     }
@@ -594,69 +626,35 @@ class OfflineStore {
   }
 
   static Future<int> flushInvoiceDrafts() async {
-    final queue = await readList('invoice_drafts_queue');
-    if (queue.isEmpty) return 0;
-    final remaining = <Map<String, dynamic>>[];
-    var synced = 0;
-    for (var index = 0; index < queue.length; index++) {
-      final queued = queue[index];
-      try {
-        final header = Map<String, dynamic>.from(queued['header'] as Map);
-        final invoiceNumber =
-            header['invoice_number'] as String? ??
-            await Supabase.instance.client.rpc(
-                  'next_invoice_number',
-                  params: Map<String, dynamic>.from(
-                    queued['number_params'] as Map,
-                  ),
-                )
-                as String;
-        header['invoice_number'] = invoiceNumber;
-        await Supabase.instance.client.from('invoices').upsert(header);
-        final items = List<Map<String, dynamic>>.from(queued['items'] as List);
-        await Supabase.instance.client.from('invoice_items').upsert(items);
-        await Supabase.instance.client
-            .from('invoices')
-            .update({
-              'status': finalizedInvoiceStatus(
-                (header['total_amount'] as num).toDouble(),
-                0,
-              ),
-            })
-            .eq('id', header['id']);
-        synced++;
-      } catch (error) {
-        remaining.addAll(queue.skip(index));
-        break;
-      }
-    }
-    await writeList('invoice_drafts_queue', remaining);
+    // A queued invoice may use a product that was also created offline.
+    await flush('products', 'products');
+    final synced = await _drain('invoice_drafts', (queued) async {
+      final header = Map<String, dynamic>.from(queued['header'] as Map);
+      final numberParams = queued['number_params'] as Map? ?? const {};
+      await Supabase.instance.client.rpc(
+        'save_invoice',
+        params: {
+          'p_invoice_id': header['id'],
+          'p_header': header,
+          'p_items': queued['items'],
+          'p_number_prefix': numberParams['p_prefix'] ?? 'INV',
+        },
+      );
+    });
     if (synced > 0) invoiceChanges.value++;
     return synced;
   }
 
-  static Future<int> flushPayments() async {
-    final queue = await readList('payments_queue');
-    if (queue.isEmpty) return 0;
-    final remaining = <Map<String, dynamic>>[];
-    var synced = 0;
-    for (var index = 0; index < queue.length; index++) {
-      try {
-        final params = Map<String, dynamic>.from(queue[index])
-          ..remove('_queue_id');
-        await Supabase.instance.client.rpc(
-          'record_invoice_payment',
-          params: params,
-        );
-        synced++;
-      } catch (_) {
-        remaining.addAll(queue.skip(index));
-        break;
-      }
-    }
-    await writeList('payments_queue', remaining);
-    return synced;
-  }
+  static Future<int> flushPayments() => _drain('payments', (queued) async {
+    final params = Map<String, dynamic>.from(queued)
+      ..removeWhere((key, _) => key.startsWith('_'));
+    // Payments queued by earlier versions have no request id of their own.
+    params['p_client_request_id'] ??= queued['_queue_id'];
+    await Supabase.instance.client.rpc(
+      'record_invoice_payment',
+      params: params,
+    );
+  });
 }
 
 Future<String?> _pickAndEditImage(
@@ -3575,6 +3573,15 @@ class _CustomersPageState extends State<CustomersPage> {
 
     try {
       await OfflineStore.flush('customers', 'customers');
+      if (mounted) {
+        unawaited(
+          _showSyncRejections(
+            context,
+            'customers',
+            (item) => 'Customer "${item['name'] ?? ''}"',
+          ),
+        );
+      }
       final rows = await Supabase.instance.client
           .from('customers')
           .select()
@@ -5519,6 +5526,17 @@ class _PaymentsPageState extends State<PaymentsPage> {
   Future<void> _load() async {
     try {
       final syncedPayments = await OfflineStore.flushPayments();
+      if (mounted) {
+        unawaited(
+          _showSyncRejections(
+            context,
+            'payments',
+            (item) =>
+                'Payment of ₹${item['p_amount']}'
+                '${item['_label'] == null ? '' : ' on invoice ${item['_label']}'}',
+          ),
+        );
+      }
       final rows = await Supabase.instance.client
           .from('invoices')
           .select(
@@ -5550,14 +5568,19 @@ class _PaymentsPageState extends State<PaymentsPage> {
   Future<void> _save() async {
     if (!_formKey.currentState!.validate() || _invoiceId == null) return;
     setState(() => _saving = true);
+    // The same request id is used for the online attempt and any offline retry,
+    // so a payment whose response was lost cannot be recorded twice.
+    final params = <String, dynamic>{
+      'p_invoice_id': _invoiceId,
+      'p_amount': double.tryParse(_amountController.text.trim()) ?? 0,
+      'p_payment_method': _method,
+      'p_payment_date': DateTime.now().toIso8601String().substring(0, 10),
+      'p_client_request_id': const Uuid().v4(),
+    };
     try {
       await Supabase.instance.client.rpc(
         'record_invoice_payment',
-        params: {
-          'p_invoice_id': _invoiceId,
-          'p_amount': double.parse(_amountController.text.trim()),
-          'p_payment_method': _method,
-        },
+        params: params,
       );
       if (!mounted) return;
       _amountController.clear();
@@ -5567,10 +5590,14 @@ class _PaymentsPageState extends State<PaymentsPage> {
       await _load();
     } catch (e) {
       if (_isOfflineError(e)) {
+        final invoiceId = params['p_invoice_id'];
         await OfflineStore.enqueue('payments', {
-          'p_invoice_id': _invoiceId,
-          'p_amount': double.parse(_amountController.text.trim()),
-          'p_payment_method': _method,
+          ...params,
+          '_queue_id': params['p_client_request_id'],
+          '_label': _invoices
+              .where((invoice) => invoice['id'].toString() == invoiceId)
+              .map((invoice) => invoice['invoice_number']?.toString() ?? '')
+              .firstOrNull,
         });
         if (mounted) {
           _amountController.clear();
@@ -6715,8 +6742,7 @@ class _QuotationsPageState extends State<QuotationsPage> {
       );
       return;
     }
-    final user = Supabase.instance.client.auth.currentUser;
-    if (user == null) {
+    if (Supabase.instance.client.auth.currentUser == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Your session has expired. Please sign in again.'),
@@ -6725,85 +6751,22 @@ class _QuotationsPageState extends State<QuotationsPage> {
       return;
     }
     try {
-      final items = await Supabase.instance.client
-          .from('quotation_items')
-          .select(
-            'product_id, item_name, quantity, uqc_code, unit_price, taxable_amount, gst_rate, tax_amount, cgst_amount, sgst_amount, igst_amount, total_amount',
-          )
-          .eq('quotation_id', quotation['id']);
-      final invoiceNumber =
-          await Supabase.instance.client.rpc(
-                'next_invoice_number',
-                params: {
-                  'p_prefix':
-                      BusinessSettings.profile.value['invoicePrefix'] ?? 'INV',
-                  'p_invoice_date': DateTime.now().toIso8601String().substring(
-                    0,
-                    10,
-                  ),
-                  'p_financial_year':
-                      BusinessSettings.profile.value['financialYear'] ?? '',
-                },
-              )
-              as String;
-      final total = _asDouble(quotation['total_amount']);
-      final invoice = await Supabase.instance.client
-          .from('invoices')
-          .insert({
-            'user_id': user.id,
-            'invoice_number': invoiceNumber,
-            'customer_name': quotation['customer_name'],
-            'invoice_date': DateTime.now().toIso8601String().substring(0, 10),
-            'status': 'draft',
-            'subtotal': items.fold<double>(
-              0,
-              (sum, row) => sum + _asDouble(row['taxable_amount']),
-            ),
-            'tax_amount': items.fold<double>(
-              0,
-              (sum, row) => sum + _asDouble(row['tax_amount']),
-            ),
-            'total_amount': total,
-            'balance_amount': total,
-            'terms': quotation['terms'],
-            'place_of_supply': quotation['place_of_supply'],
-            'tax_type': _asDouble(quotation['igst_amount']) > 0
-                ? 'igst'
-                : 'cgst_sgst',
-            'cgst_amount': _asDouble(quotation['cgst_amount']),
-            'sgst_amount': _asDouble(quotation['sgst_amount']),
-            'igst_amount': _asDouble(quotation['igst_amount']),
-          })
-          .select('*')
-          .single();
-      await Supabase.instance.client
-          .from('invoice_items')
-          .insert(
-            List<Map<String, dynamic>>.from(items)
-                .map(
-                  (item) => {
-                    'invoice_id': invoice['id'],
-                    'product_id': item['product_id'],
-                    'product_name': item['item_name'],
-                    'item_name': item['item_name'],
-                    'quantity': item['quantity'],
-                    'uqc_code': item['uqc_code'],
-                    'unit_price': item['unit_price'],
-                    'taxable_amount': item['taxable_amount'],
-                    'gst_rate': item['gst_rate'],
-                    'tax_amount': item['tax_amount'],
-                    'cgst_amount': item['cgst_amount'],
-                    'sgst_amount': item['sgst_amount'],
-                    'igst_amount': item['igst_amount'],
-                    'total_amount': item['total_amount'],
-                  },
-                )
-                .toList(),
-          );
-      await Supabase.instance.client
-          .from('quotations')
-          .update({'status': 'accepted', 'converted_invoice_id': invoice['id']})
-          .eq('id', quotation['id']);
+      final invoice = Map<String, dynamic>.from(
+        await Supabase.instance.client.rpc(
+              'convert_quotation_to_invoice',
+              params: {
+                'p_quotation_id': quotation['id'],
+                'p_invoice_date': DateTime.now().toIso8601String().substring(
+                  0,
+                  10,
+                ),
+                'p_number_prefix':
+                    BusinessSettings.profile.value['invoicePrefix'] ?? 'INV',
+              },
+            )
+            as Map,
+      );
+      final invoiceNumber = invoice['invoice_number'];
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -6827,10 +6790,6 @@ class _QuotationsPageState extends State<QuotationsPage> {
       }
     }
   }
-
-  double _asDouble(dynamic value) => value is num
-      ? value.toDouble()
-      : double.tryParse(value?.toString() ?? '') ?? 0;
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -8029,6 +7988,16 @@ class _InvoiceHistoryPageState extends State<InvoiceHistoryPage> {
     });
     try {
       final syncedDrafts = await OfflineStore.flushInvoiceDrafts();
+      if (mounted) {
+        unawaited(
+          _showSyncRejections(
+            context,
+            'invoice_drafts',
+            (item) =>
+                'Invoice for ${(item['header'] as Map?)?['customer_name'] ?? 'a customer'}',
+          ),
+        );
+      }
       final rows = await Supabase.instance.client
           .from('invoices')
           .select(
@@ -8222,6 +8191,9 @@ class InvoiceBuilderPage extends StatefulWidget {
 }
 
 class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
+  /// Lets a retry of this save find the invoice instead of creating another.
+  final String _newInvoiceId = const Uuid().v4();
+
   final _numberController = TextEditingController();
   String? _numberError;
   String _customerAddress = '';
@@ -8456,6 +8428,46 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
   String _dateForDatabase(DateTime date) =>
       '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
 
+  /// The fields of this invoice the server accepts. Status, balance and paid
+  /// amount are always decided by the server.
+  Map<String, dynamic> _invoiceHeaderPayload() => {
+    'invoice_number': _numberController.text.trim().toUpperCase(),
+    'customer_name': _customerController.text.trim(),
+    'customer_gstin': _customerGstinController.text.trim().toUpperCase(),
+    'invoice_date': _dateForDatabase(_invoiceDate),
+    'due_date': _dueDate == null ? null : _dateForDatabase(_dueDate!),
+    'subtotal': _subtotal,
+    'tax_amount': _taxTotal,
+    'total_amount': _grandTotal,
+    'terms': _termsController.text.trim(),
+    'place_of_supply': _placeOfSupplyController.text.trim(),
+    'tax_type': _taxTotal == 0
+        ? 'none'
+        : (_isIntraState ? 'cgst_sgst' : 'igst'),
+    'cgst_amount': _cgstTotal,
+    'sgst_amount': _sgstTotal,
+    'igst_amount': _igstTotal,
+  };
+
+  List<Map<String, dynamic>> _invoiceItemsPayload() => _items
+      .map(
+        (item) => <String, dynamic>{
+          'product_id': item.productId,
+          'item_name': item.productController.text.trim(),
+          'quantity': item.quantity,
+          'uqc_code': item.uqcCode,
+          'unit_price': item.rate,
+          'taxable_amount': item.taxableAmount,
+          'gst_rate': item.gstRate,
+          'tax_amount': item.taxAmount,
+          'cgst_amount': _isIntraState ? item.taxAmount / 2 : 0,
+          'sgst_amount': _isIntraState ? item.taxAmount / 2 : 0,
+          'igst_amount': _isIntraState ? 0 : item.taxAmount,
+          'total_amount': item.total,
+        },
+      )
+      .toList();
+
   Future<void> _saveDraft({required bool openPreview}) async {
     if (_isSavingDraft) return;
     if (!_formKey.currentState!.validate()) return;
@@ -8475,108 +8487,23 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
     var saved = false;
     String savedNumber = 'Pending sync';
     try {
-      final invoiceNumber = _numberController.text.trim().isNotEmpty
-          ? _numberController.text.trim().toUpperCase()
-          : _isEditing
-          ? widget.sourceInvoice!['invoice_number']?.toString() ?? 'Invoice'
-          : await Supabase.instance.client.rpc(
-                  'next_invoice_number',
-                  params: {
-                    'p_prefix':
-                        BusinessSettings.profile.value['invoicePrefix'] ??
-                        'INV',
-                    'p_invoice_date': _dateForDatabase(_invoiceDate),
-                    'p_financial_year':
-                        BusinessSettings.profile.value['financialYear'] ?? '',
-                  },
-                )
-                as String;
-      final invoiceData = <String, dynamic>{
-        'user_id': user.id,
-        'invoice_number': invoiceNumber,
-        'customer_name': _customerController.text.trim(),
-        'customer_gstin': _customerGstinController.text.trim().toUpperCase(),
-        'invoice_date': _dateForDatabase(_invoiceDate),
-        'due_date': _dueDate == null ? null : _dateForDatabase(_dueDate!),
-        'status': 'draft',
-        'subtotal': _subtotal,
-        'tax_amount': _taxTotal,
-        'total_amount': _grandTotal,
-        'balance_amount': _isEditing
-            ? (_grandTotal -
-                      ((widget.sourceInvoice!['paid_amount'] as num?)
-                              ?.toDouble() ??
-                          0))
-                  .clamp(0, double.infinity)
-            : _grandTotal,
-        'terms': _termsController.text.trim(),
-        'place_of_supply': _placeOfSupplyController.text.trim(),
-        'tax_type': _taxTotal == 0
-            ? 'none'
-            : (_isIntraState ? 'cgst_sgst' : 'igst'),
-        'cgst_amount': _cgstTotal,
-        'sgst_amount': _sgstTotal,
-        'igst_amount': _igstTotal,
-      };
-      late final Map<String, dynamic> invoice;
-      if (_isEditing) {
-        invoice = await Supabase.instance.client
-            .from('invoices')
-            .update(invoiceData)
-            .eq('id', widget.sourceInvoice!['id'])
-            .select('id')
-            .single();
-        await Supabase.instance.client
-            .from('invoice_items')
-            .delete()
-            .eq('invoice_id', invoice['id']);
-      } else {
-        invoice = await Supabase.instance.client
-            .from('invoices')
-            .insert(invoiceData)
-            .select('id')
-            .single();
-      }
-      final invoiceId = invoice['id'];
-      await Supabase.instance.client
-          .from('invoice_items')
-          .insert(
-            _items
-                .map(
-                  (item) => {
-                    'invoice_id': invoiceId,
-                    'product_id': item.productId,
-                    // Older deployments require this legacy field; keep it in sync
-                    // with the current item_name field for backward compatibility.
-                    'product_name': item.productController.text.trim(),
-                    'item_name': item.productController.text.trim(),
-                    'quantity': item.quantity,
-                    'uqc_code': item.uqcCode,
-                    'unit_price': item.rate,
-                    'taxable_amount': item.taxableAmount,
-                    'gst_rate': item.gstRate,
-                    'tax_amount': item.taxAmount,
-                    'cgst_amount': _isIntraState ? item.taxAmount / 2 : 0,
-                    'sgst_amount': _isIntraState ? item.taxAmount / 2 : 0,
-                    'igst_amount': _isIntraState ? 0 : item.taxAmount,
-                    'total_amount': item.total,
-                  },
-                )
-                .toList(),
-          );
-      await Supabase.instance.client
-          .from('invoices')
-          .update({
-            'status': finalizedInvoiceStatus(
-              _grandTotal,
-              _isEditing
-                  ? ((widget.sourceInvoice!['paid_amount'] as num?)
-                            ?.toDouble() ??
-                        0)
-                  : 0,
-            ),
-          })
-          .eq('id', invoiceId);
+      final invoice = Map<String, dynamic>.from(
+        await Supabase.instance.client.rpc(
+              'save_invoice',
+              params: {
+                'p_invoice_id': _isEditing
+                    ? widget.sourceInvoice!['id']
+                    : _newInvoiceId,
+                'p_header': _invoiceHeaderPayload(),
+                'p_items': _invoiceItemsPayload(),
+                'p_is_edit': _isEditing,
+                'p_number_prefix':
+                    BusinessSettings.profile.value['invoicePrefix'] ?? 'INV',
+              },
+            )
+            as Map,
+      );
+      final invoiceNumber = invoice['invoice_number'] as String;
       invoiceChanges.value++;
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -8594,60 +8521,12 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
       if (_isOfflineError(e) &&
           !_isEditing &&
           _numberController.text.trim().isEmpty) {
-        final invoiceId = const Uuid().v4();
-        final header = <String, dynamic>{
-          if (_numberController.text.trim().isNotEmpty)
-            'invoice_number': _numberController.text.trim().toUpperCase(),
-          'id': invoiceId,
-          'user_id': user.id,
-          'customer_name': _customerController.text.trim(),
-          'customer_gstin': _customerGstinController.text.trim().toUpperCase(),
-          'invoice_date': _dateForDatabase(_invoiceDate),
-          'due_date': _dueDate == null ? null : _dateForDatabase(_dueDate!),
-          'status': 'draft',
-          'subtotal': _subtotal,
-          'tax_amount': _taxTotal,
-          'total_amount': _grandTotal,
-          'balance_amount': _grandTotal,
-          'terms': _termsController.text.trim(),
-          'place_of_supply': _placeOfSupplyController.text.trim(),
-          'tax_type': _taxTotal == 0
-              ? 'none'
-              : (_isIntraState ? 'cgst_sgst' : 'igst'),
-          'cgst_amount': _cgstTotal,
-          'sgst_amount': _sgstTotal,
-          'igst_amount': _igstTotal,
-        };
-        final items = _items
-            .map(
-              (item) => <String, dynamic>{
-                'id': const Uuid().v4(),
-                'invoice_id': invoiceId,
-                'product_id': item.productId,
-                'product_name': item.productController.text.trim(),
-                'item_name': item.productController.text.trim(),
-                'quantity': item.quantity,
-                'uqc_code': item.uqcCode,
-                'unit_price': item.rate,
-                'taxable_amount': item.taxableAmount,
-                'gst_rate': item.gstRate,
-                'tax_amount': item.taxAmount,
-                'cgst_amount': _isIntraState ? item.taxAmount / 2 : 0,
-                'sgst_amount': _isIntraState ? item.taxAmount / 2 : 0,
-                'igst_amount': _isIntraState ? 0 : item.taxAmount,
-                'total_amount': item.total,
-              },
-            )
-            .toList();
         await OfflineStore.enqueue('invoice_drafts', {
-          'header': header,
-          'items': items,
+          'header': {..._invoiceHeaderPayload(), 'id': _newInvoiceId},
+          'items': _invoiceItemsPayload(),
           'number_params': {
             'p_prefix':
                 BusinessSettings.profile.value['invoicePrefix'] ?? 'INV',
-            'p_invoice_date': _dateForDatabase(_invoiceDate),
-            'p_financial_year':
-                BusinessSettings.profile.value['financialYear'] ?? '',
           },
         });
         saved = true;
@@ -9873,6 +9752,15 @@ class _ProductsPageState extends State<ProductsPage> {
     });
     try {
       await OfflineStore.flush('products', 'products');
+      if (mounted) {
+        unawaited(
+          _showSyncRejections(
+            context,
+            'products',
+            (item) => 'Product or service "${item['name'] ?? ''}"',
+          ),
+        );
+      }
       final rows = await Supabase.instance.client
           .from('products')
           .select(
