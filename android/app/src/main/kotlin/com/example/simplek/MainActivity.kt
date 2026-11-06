@@ -47,15 +47,25 @@ class MainActivity : FlutterActivity() {
                         clipData = ClipData.newRawUri("Invoice PDF", uri)
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     }
-                    if (call.argument<String>("target") == "whatsapp") {
+                    val target = call.argument<String>("target")
+                    if (target == "whatsapp" || target == "whatsapp_picker") {
                         val pkg = listOf("com.whatsapp", "com.whatsapp.w4b").firstOrNull {
                             packageManager.getLaunchIntentForPackage(it) != null
                         } ?: throw IllegalStateException("Please install WhatsApp or WhatsApp Business.")
                         intent.setPackage(pkg)
+                        if (target == "whatsapp") {
+                            val recipient = call.argument<String>("recipient") ?: ""
+                            require(recipient.matches(Regex("[0-9]{8,15}"))) { "Invalid WhatsApp number" }
+                            // Best-effort recipient hint. WhatsApp versions may ignore it
+                            // and show their contact picker; never assume delivery.
+                            intent.putExtra("jid", "$recipient@s.whatsapp.net")
+                        }
                         startActivity(intent)
-                    } else {
+                    } else if (call.argument<String>("target") == "email") {
                         intent.putExtra(Intent.EXTRA_EMAIL, arrayOf(call.argument<String>("recipient") ?: ""))
                         startActivity(Intent.createChooser(intent, "Email invoice PDF"))
+                    } else {
+                        startActivity(Intent.createChooser(intent, "Share invoice PDF"))
                     }
                     result.success(null)
                 } catch (e: Exception) {

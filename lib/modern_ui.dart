@@ -309,6 +309,9 @@ class DocumentShareBar extends StatelessWidget {
           final narrow =
               constraints.maxWidth < 420 ||
               MediaQuery.textScalerOf(context).scale(14) > 20;
+          final stacked =
+              constraints.maxWidth < 300 ||
+              MediaQuery.textScalerOf(context).scale(14) > 20;
           return Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -325,16 +328,20 @@ class DocumentShareBar extends StatelessWidget {
               ),
               SizedBox(
                 width: narrow
-                    ? (constraints.maxWidth - 8) / 2
+                    ? (stacked
+                          ? constraints.maxWidth
+                          : (constraints.maxWidth - 8) / 2)
                     : (constraints.maxWidth - 16) / 3,
                 child: OutlinedButton(
                   onPressed: onWhatsApp,
-                  child: const Text('WhatsApp'),
+                  child: const Text('WhatsApp', maxLines: 1, softWrap: false),
                 ),
               ),
               SizedBox(
                 width: narrow
-                    ? (constraints.maxWidth - 8) / 2
+                    ? (stacked
+                          ? constraints.maxWidth
+                          : (constraints.maxWidth - 8) / 2)
                     : (constraints.maxWidth - 16) / 3,
                 child: OutlinedButton(
                   onPressed: onEmail,
@@ -518,6 +525,7 @@ class ModernOverview extends StatelessWidget {
     required this.outstanding,
     required this.invoiceCount,
     required this.customerCount,
+    this.productCount,
     required this.loading,
     required this.error,
     required this.recent,
@@ -529,6 +537,7 @@ class ModernOverview extends StatelessWidget {
     required this.onRefresh,
   });
   final String sales, outstanding, invoiceCount, customerCount;
+  final String? productCount;
   final bool loading;
   final String? error;
   final List<Map<String, String>> recent;
@@ -630,6 +639,13 @@ class ModernOverview extends StatelessWidget {
                   false,
                 ),
                 metric('Customers', customerCount, Icons.people_outline, false),
+                if (productCount != null)
+                  metric(
+                    'Products & services',
+                    productCount!,
+                    Icons.inventory_2_outlined,
+                    false,
+                  ),
               ],
             );
           },

@@ -207,6 +207,9 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.tap(find.text('Save & Next'));
     expect(saves, 1);
+    final whatsapp = tester.widget<Text>(find.text('WhatsApp'));
+    expect(whatsapp.maxLines, 1);
+    expect(whatsapp.softWrap, false);
   });
 
   testWidgets('state picker filters and selects full names', (tester) async {

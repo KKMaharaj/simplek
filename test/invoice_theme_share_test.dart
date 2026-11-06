@@ -51,7 +51,9 @@ void main() {
         for (final palette in InvoicePalette.options) {
           final page = InvoicePreviewPage(
             customerName: 'Sample Customer',
-            customerPhone: '',
+            customerAddress: 'Customer Road\nMumbai, Maharashtra',
+            customerGstin: '27ABCDE1234F1Z5',
+            customerPhone: '9876543210',
             customerEmail: '',
             placeOfSupply: 'Maharashtra',
             invoiceDate: DateTime(2026, 9, 22),
