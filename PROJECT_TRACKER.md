@@ -178,6 +178,10 @@ applied to the live project by 2026-09-04.
 - The one ownerless invoice, `INV/2026-27/0008` (a pre-login draft), was given
   to Malnad Kitchen (account `04453ceb…`) by
   `20261115000001_assign_orphan_invoice.sql`. Its number does not affect that
-  business's sequence. Still ownerless and invisible, all created before any
-  account existed: 1 quotation (`QTN/2026-27/0001`), 5 customers and the
-  product "auditing" that this invoice's line item uses.
+  business's sequence.
+- The remaining ownerless test rows, all created before any account existed,
+  were deleted by `20261115000002_delete_ownerless_test_rows.sql`: quotation
+  `QTN/2026-27/0001` with its item, 5 customers and the product "auditing".
+  The line on `INV/2026-27/0008` kept its name and amounts and lost only its
+  product link. No ownerless rows remain; restoring them needs the 2026-11-15
+  backup.
