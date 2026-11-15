@@ -174,5 +174,10 @@ applied to the live project by 2026-09-04.
   out with `supabase db push --remote` (dry-run first with `--dry-run`).
 - Both regression scripts passed on live; row counts were unchanged.
 - Still open: the repo's migrations cannot build the database from scratch (no
-  migration creates `customers`, `products` or `invoice_items`). One invoice has
-  no owner and is invisible to every user.
+  migration creates `customers`, `products` or `invoice_items`).
+- The one ownerless invoice, `INV/2026-27/0008` (a pre-login draft), was given
+  to Malnad Kitchen (account `04453ceb…`) by
+  `20261115000001_assign_orphan_invoice.sql`. Its number does not affect that
+  business's sequence. Still ownerless and invisible, all created before any
+  account existed: 1 quotation (`QTN/2026-27/0001`), 5 customers and the
+  product "auditing" that this invoice's line item uses.
