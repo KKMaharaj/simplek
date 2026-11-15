@@ -5,6 +5,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import android.content.Intent
 import android.content.ClipData
+import android.net.Uri
 import androidx.core.content.FileProvider
 import java.io.File
 
@@ -13,6 +14,20 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "simplek/document_share")
             .setMethodCallHandler { call, result ->
+                if (call.method == "openChat") {
+                    try {
+                        val uri = Uri.parse(call.argument<String>("url") ?: "")
+                        require(uri.scheme == "https" && uri.host == "wa.me") { "Invalid WhatsApp link" }
+                        val pkg = listOf("com.whatsapp", "com.whatsapp.w4b").firstOrNull {
+                            packageManager.getLaunchIntentForPackage(it) != null
+                        } ?: throw IllegalStateException("Please install WhatsApp or WhatsApp Business.")
+                        startActivity(Intent(Intent.ACTION_VIEW, uri).setPackage(pkg))
+                        result.success(null)
+                    } catch (e: Exception) {
+                        result.error("CHAT_FAILED", e.message, null)
+                    }
+                    return@setMethodCallHandler
+                }
                 if (call.method != "share") {
                     result.notImplemented()
                     return@setMethodCallHandler
@@ -32,16 +47,25 @@ class MainActivity : FlutterActivity() {
                         clipData = ClipData.newRawUri("Invoice PDF", uri)
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     }
-                    if (call.argument<String>("target") == "whatsapp") {
+                    val target = call.argument<String>("target")
+                    if (target == "whatsapp" || target == "whatsapp_picker") {
                         val pkg = listOf("com.whatsapp", "com.whatsapp.w4b").firstOrNull {
                             packageManager.getLaunchIntentForPackage(it) != null
                         } ?: throw IllegalStateException("Please install WhatsApp or WhatsApp Business.")
                         intent.setPackage(pkg)
-                        intent.putExtra("jid", call.argument<String>("recipient") + "@s.whatsapp.net")
+                        if (target == "whatsapp") {
+                            val recipient = call.argument<String>("recipient") ?: ""
+                            require(recipient.matches(Regex("[0-9]{8,15}"))) { "Invalid WhatsApp number" }
+                            // Best-effort recipient hint. WhatsApp versions may ignore it
+                            // and show their contact picker; never assume delivery.
+                            intent.putExtra("jid", "$recipient@s.whatsapp.net")
+                        }
                         startActivity(intent)
-                    } else {
+                    } else if (call.argument<String>("target") == "email") {
                         intent.putExtra(Intent.EXTRA_EMAIL, arrayOf(call.argument<String>("recipient") ?: ""))
                         startActivity(Intent.createChooser(intent, "Email invoice PDF"))
+                    } else {
+                        startActivity(Intent.createChooser(intent, "Share invoice PDF"))
                     }
                     result.success(null)
                 } catch (e: Exception) {

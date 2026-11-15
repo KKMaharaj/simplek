@@ -1,6 +1,6 @@
 # Simplek - Project Tracker
 
-Last updated: 2026-09-01
+Last updated: 2026-09-22
 
 This tracker maps the Software Requirements Document (SRD) to the current
 implementation. Update the status and notes whenever a feature changes.
@@ -111,6 +111,26 @@ implementation. Update the status and notes whenever a feature changes.
 1. Provide `GSTINAPI_KEY` to deploy and activate the GSTIN lookup Edge Function.
 2. Add `simplek://login-callback/` in Supabase Auth URL Configuration using a dashboard role with Auth configuration access.
 3. Run the iOS build on macOS/Xcode.
+4. The requested fresh-start reset and creation of a separate test account are
+   pending Supabase administrator sign-in. On 2026-09-22, both browser sessions
+   were signed out and no administrator credentials were available in the
+   workspace. No accounts or billing data have been deleted.
+
+## September 22 invoice improvements
+
+- Five invoice palettes: white/red, white/blue, cream/blue, light yellow/blue,
+  and white/dark green. The choice is stored in authenticated user metadata
+  and cached under a user-specific key. No new database migration is needed.
+- Business Settings previews the actual PDF using unsaved profile values and
+  sample items; preview mode cannot save or share sample invoices.
+- WhatsApp offers a client chat with an encoded prefilled message, targeted
+  PDF attachment sharing, and message copying. Attachment sharing still
+  requires selecting the recipient in WhatsApp; document captions depend on
+  WhatsApp. Removed the unsupported recipient `jid` intent dependency.
+- All 17 tests passed, including five multi-page PDF generations and phone /
+  message normalization. All ten rendered sample PDF pages were inspected.
+- Final on-phone WhatsApp testing remains pending: no Android device was
+  connected during this change.
 
 ## Next implementation milestone
 
@@ -120,3 +140,20 @@ limited to the external blockers above and the low-risk architectural file split
 Security and media migrations through `20260901_quotation_rls.sql`,
 `20260901_business_media_storage.sql`, and `20260904_invoice_rls.sql` were
 applied to the live project by 2026-09-04.
+
+## November 6 payment and invoice-save fixes
+
+- **Deploy order:** apply `20261106_atomic_invoice_payment_saves.sql` before
+  shipping this app version. The new app cannot save invoices without it; older
+  app versions keep working after it is applied.
+- `record_invoice_payment` now checks invoice ownership, is closed to `anon`,
+  and ignores a repeated `client_request_id`.
+- `save_invoice` and `convert_quotation_to_invoice` run as one transaction, so a
+  failure leaves no partial document and uses no number. Retrying a create with
+  the same invoice id returns the saved invoice.
+- Offline queues (`lib/offline_queue.dart`) keep items added during a sync, send
+  each item once, and set aside items the server refuses, telling the user.
+  Offline payments keep the date they were recorded.
+- `supabase/tests/20261106_atomic_saves_regressions.sql` passed on a local
+  Postgres built from the migrations. It has not been run on the live project,
+  and these flows have not been tried on a device.

@@ -1,6 +1,12 @@
 import 'dart:async';
 import 'document_defaults.dart';
+import 'document_text.dart';
+import 'document_sharing.dart';
+import 'invoice_palette.dart';
+import 'whatsapp_contact.dart';
 import 'payment_pdf.dart';
+import 'modern_ui.dart';
+import 'offline_queue.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -20,6 +26,61 @@ import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
+
+final invoiceChanges = ValueNotifier<int>(0);
+
+Future<void> _removeCatalogEntry(
+  BuildContext context,
+  String table,
+  Map<String, dynamic> record,
+  Future<void> Function() reload,
+) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text('Delete ${record['name']}?'),
+      content: const Text(
+        'Remove this entry from your active list and new-document pickers. Existing invoices and quotations will stay unchanged.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Delete'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true) return;
+  try {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) {
+      throw const AuthException('Please sign in again.');
+    }
+    // Archive, never cascade-delete historical documents or their references.
+    await Supabase.instance.client
+        .from(table)
+        .update({'is_active': false})
+        .eq('id', record['id'])
+        .eq('user_id', user.id)
+        .select('id')
+        .single();
+    final cached = await OfflineStore.readList(table);
+    cached.removeWhere((row) => row['id'] == record['id']);
+    await OfflineStore.writeList(table, cached);
+    invoiceChanges.value++;
+    await reload();
+  } catch (error) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Unable to delete entry: $error')));
+    }
+  }
+}
 
 String _titleCase(String value) =>
     value.replaceAllMapped(RegExp(r'\S+'), (match) {
@@ -97,6 +158,45 @@ bool _isOfflineError(Object error) {
       message.contains('connection refused') ||
       message.contains('connection reset') ||
       message.contains('clientexception');
+}
+
+/// Tells the user about queued work the server refused, which will not retry.
+Future<void> _showSyncRejections(
+  BuildContext context,
+  String name,
+  String Function(Map<String, dynamic> item) describe,
+) async {
+  if (!context.mounted) return;
+  final rejected = await OfflineStore.takeRejected(name);
+  if (rejected.isEmpty || !context.mounted) return;
+  await showDialog<void>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Some offline changes were not saved'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final entry in rejected)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  '${describe(Map<String, dynamic>.from(entry['item'] as Map))}\n'
+                  '${entry['reason']}',
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: const Text('OK'),
+        ),
+      ],
+    ),
+  );
 }
 
 Future<Map<String, dynamic>?> _showSearchableRecordPicker(
@@ -494,95 +594,67 @@ class OfflineStore {
     await writeList(name, rows);
   }
 
-  static Future<void> enqueue(String name, Map<String, dynamic> payload) async {
-    final queue = await readList('${name}_queue');
-    final queued = Map<String, dynamic>.from(payload);
-    final identity = queued['id'] ?? queued['_queue_id'] ?? const Uuid().v4();
-    if (queued['id'] == null) queued['_queue_id'] = identity;
-    queue.removeWhere((item) => (item['id'] ?? item['_queue_id']) == identity);
-    queue.add(queued);
-    await writeList('${name}_queue', queue);
-  }
+  static Future<void> enqueue(String name, Map<String, dynamic> payload) =>
+      OfflineQueue.add(_key('${name}_queue'), payload);
+
+  /// Items the server refused during sync, cleared once returned.
+  static Future<List<Map<String, dynamic>>> takeRejected(String name) =>
+      OfflineQueue.takeRejected(_key('${name}_rejected'));
+
+  static Future<int> _drain(
+    String name,
+    Future<void> Function(Map<String, dynamic> item) send,
+  ) => OfflineQueue.drain(
+    key: _key('${name}_queue'),
+    rejectedKey: _key('${name}_rejected'),
+    send: send,
+  );
 
   static Future<int> flush(String table, String name) async {
-    final queue = await readList('${name}_queue');
-    if (queue.isEmpty) return 0;
-    var synced = 0;
-    final remaining = <Map<String, dynamic>>[];
-    for (var index = 0; index < queue.length; index++) {
-      final payload = queue[index];
+    final synced = await _drain(name, (payload) async {
       try {
         await Supabase.instance.client.from(table).insert(payload);
-        synced++;
       } on PostgrestException catch (error) {
-        if (error.code == '23505') {
-          synced++;
-        } else {
-          remaining.addAll(queue.skip(index));
-          break;
-        }
-      } catch (_) {
-        remaining.addAll(queue.skip(index));
-        break;
+        // Already saved by an earlier attempt.
+        if (error.code != '23505') rethrow;
       }
+    });
+    if (synced > 0 && (name == 'customers' || name == 'products')) {
+      invoiceChanges.value++;
     }
-    await writeList('${name}_queue', remaining);
     return synced;
   }
 
   static Future<int> flushInvoiceDrafts() async {
-    final queue = await readList('invoice_drafts_queue');
-    if (queue.isEmpty) return 0;
-    final remaining = <Map<String, dynamic>>[];
-    var synced = 0;
-    for (var index = 0; index < queue.length; index++) {
-      final queued = queue[index];
-      try {
-        final header = Map<String, dynamic>.from(queued['header'] as Map);
-        final invoiceNumber =
-            await Supabase.instance.client.rpc(
-                  'next_invoice_number',
-                  params: Map<String, dynamic>.from(
-                    queued['number_params'] as Map,
-                  ),
-                )
-                as String;
-        header['invoice_number'] = invoiceNumber;
-        await Supabase.instance.client.from('invoices').upsert(header);
-        final items = List<Map<String, dynamic>>.from(queued['items'] as List);
-        await Supabase.instance.client.from('invoice_items').upsert(items);
-        synced++;
-      } catch (error) {
-        remaining.addAll(queue.skip(index));
-        break;
-      }
-    }
-    await writeList('invoice_drafts_queue', remaining);
+    // A queued invoice may use a product that was also created offline.
+    await flush('products', 'products');
+    final synced = await _drain('invoice_drafts', (queued) async {
+      final header = Map<String, dynamic>.from(queued['header'] as Map);
+      final numberParams = queued['number_params'] as Map? ?? const {};
+      await Supabase.instance.client.rpc(
+        'save_invoice',
+        params: {
+          'p_invoice_id': header['id'],
+          'p_header': header,
+          'p_items': queued['items'],
+          'p_number_prefix': numberParams['p_prefix'] ?? 'INV',
+        },
+      );
+    });
+    if (synced > 0) invoiceChanges.value++;
     return synced;
   }
 
-  static Future<int> flushPayments() async {
-    final queue = await readList('payments_queue');
-    if (queue.isEmpty) return 0;
-    final remaining = <Map<String, dynamic>>[];
-    var synced = 0;
-    for (var index = 0; index < queue.length; index++) {
-      try {
-        final params = Map<String, dynamic>.from(queue[index])
-          ..remove('_queue_id');
-        await Supabase.instance.client.rpc(
-          'record_invoice_payment',
-          params: params,
-        );
-        synced++;
-      } catch (_) {
-        remaining.addAll(queue.skip(index));
-        break;
-      }
-    }
-    await writeList('payments_queue', remaining);
-    return synced;
-  }
+  static Future<int> flushPayments() => _drain('payments', (queued) async {
+    final params = Map<String, dynamic>.from(queued)
+      ..removeWhere((key, _) => key.startsWith('_'));
+    // Payments queued by earlier versions have no request id of their own.
+    params['p_client_request_id'] ??= queued['_queue_id'];
+    await Supabase.instance.client.rpc(
+      'record_invoice_payment',
+      params: params,
+    );
+  });
 }
 
 Future<String?> _pickAndEditImage(
@@ -788,6 +860,7 @@ Future<void> main() async {
   );
 
   await BusinessSettings.load();
+  await DesignSettings.load();
 
   runApp(const MyApp());
 }
@@ -803,73 +876,86 @@ class MyApp extends StatelessWidget {
       seedColor: const Color(0xFF3157A4),
       brightness: Brightness.light,
     );
-    return ValueListenableBuilder<ThemeMode>(
-      valueListenable: BusinessSettings.themeMode,
-      builder: (context, mode, _) => MaterialApp(
-        themeMode: mode,
-        darkTheme: ThemeData(
-          useMaterial3: true,
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFF3157A4),
-            brightness: Brightness.dark,
-          ),
-          inputDecorationTheme: InputDecorationTheme(
-            filled: true,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-            contentPadding: const EdgeInsets.all(16),
-          ),
-          filledButtonTheme: FilledButtonThemeData(
-            style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
-          ),
+    return ValueListenableBuilder<bool>(
+      valueListenable: DesignSettings.modern,
+      builder: (context, modern, _) => ValueListenableBuilder<ThemeMode>(
+        valueListenable: BusinessSettings.themeMode,
+        builder: (context, mode, _) => MaterialApp(
+          themeMode: mode,
+          darkTheme: modern
+              ? simplekTheme(Brightness.dark)
+              : ThemeData(
+                  useMaterial3: true,
+                  colorScheme: ColorScheme.fromSeed(
+                    seedColor: const Color(0xFF3157A4),
+                    brightness: Brightness.dark,
+                  ),
+                  inputDecorationTheme: InputDecorationTheme(
+                    filled: true,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    contentPadding: const EdgeInsets.all(16),
+                  ),
+                  filledButtonTheme: FilledButtonThemeData(
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(48, 52),
+                    ),
+                  ),
+                ),
+          debugShowCheckedModeBanner: false,
+          title: 'Simplek',
+          theme: modern
+              ? simplekTheme(Brightness.light)
+              : ThemeData(
+                  useMaterial3: true,
+                  colorScheme: colorScheme,
+                  scaffoldBackgroundColor: const Color(0xFFF6F7FB),
+                  appBarTheme: const AppBarTheme(
+                    backgroundColor: Color(0xFFF6F7FB),
+                    surfaceTintColor: Colors.transparent,
+                    centerTitle: false,
+                  ),
+                  inputDecorationTheme: InputDecorationTheme(
+                    filled: true,
+                    fillColor: Colors.white,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 16,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: colorScheme.outlineVariant),
+                    ),
+                  ),
+                  cardTheme: CardThemeData(
+                    elevation: 0,
+                    color: Colors.white,
+                    margin: EdgeInsets.zero,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: BorderSide(color: colorScheme.outlineVariant),
+                    ),
+                  ),
+                  filledButtonTheme: FilledButtonThemeData(
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(48, 52),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                  floatingActionButtonTheme: FloatingActionButtonThemeData(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                ),
+          home: home ?? const AppLaunchSplash(),
         ),
-        debugShowCheckedModeBanner: false,
-        title: 'Simplek',
-        theme: ThemeData(
-          useMaterial3: true,
-          colorScheme: colorScheme,
-          scaffoldBackgroundColor: const Color(0xFFF6F7FB),
-          appBarTheme: const AppBarTheme(
-            backgroundColor: Color(0xFFF6F7FB),
-            surfaceTintColor: Colors.transparent,
-            centerTitle: false,
-          ),
-          inputDecorationTheme: InputDecorationTheme(
-            filled: true,
-            fillColor: Colors.white,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: 16,
-            ),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: colorScheme.outlineVariant),
-            ),
-          ),
-          cardTheme: CardThemeData(
-            elevation: 0,
-            color: Colors.white,
-            margin: EdgeInsets.zero,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-              side: BorderSide(color: colorScheme.outlineVariant),
-            ),
-          ),
-          filledButtonTheme: FilledButtonThemeData(
-            style: FilledButton.styleFrom(
-              minimumSize: const Size(48, 52),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-          floatingActionButtonTheme: FloatingActionButtonThemeData(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-          ),
-        ),
-        home: home ?? const AppLaunchSplash(),
       ),
     );
   }
@@ -1010,12 +1096,164 @@ class _AuthGateState extends State<AuthGate> {
         mobile: pendingSignup['mobile']!,
       );
     }
-    return const DashboardPage();
+    return ValueListenableBuilder<bool>(
+      valueListenable: DesignSettings.modern,
+      builder: (_, modern, _) =>
+          modern ? const _ModernHome() : const DashboardPage(),
+    );
   }
 }
 
 void _openPage(BuildContext context, Widget page) {
   Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
+}
+
+void _returnToDashboard(BuildContext context) {
+  DesignSettings.destination.value = 0;
+  Navigator.of(context).popUntil((route) => route.isFirst);
+}
+
+class _ModernHome extends StatelessWidget {
+  const _ModernHome();
+
+  Future<void> _create(BuildContext context) async {
+    final choice = await showModalBottomSheet<int>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheet) => SafeArea(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: EditorSection(
+                  'Create something new',
+                  'Choose your next action.',
+                ),
+              ),
+              for (final entry in const [
+                (Icons.receipt_long_outlined, 'New invoice'),
+                (Icons.description_outlined, 'New quotation'),
+                (Icons.payments_outlined, 'Record payment'),
+              ].indexed)
+                ListTile(
+                  leading: Icon(entry.$2.$1),
+                  title: Text(entry.$2.$2),
+                  onTap: () => Navigator.of(sheet).pop(entry.$1),
+                ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (!context.mounted || choice == null) return;
+    _openPage(context, switch (choice) {
+      0 => const InvoiceBuilderPage(),
+      1 => const QuotationBuilderPage(),
+      _ => const PaymentsPage(),
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<int>(
+    valueListenable: DesignSettings.destination,
+    builder: (context, index, _) => PopScope(
+      canPop: index == 0,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) DesignSettings.destination.value = 0;
+      },
+      child: Scaffold(
+        body: switch (index) {
+          1 => const InvoiceHistoryPage(),
+          2 => const CustomersPage(),
+          3 => const ProductsPage(),
+          4 => const _MorePage(),
+          _ => const DashboardPage(),
+        },
+        floatingActionButton: index == 0 || index == 4
+            ? FloatingActionButton.extended(
+                onPressed: () => _create(context),
+                icon: const Icon(Icons.add),
+                label: const Text('Create'),
+              )
+            : null,
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: index,
+          labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
+          onDestinationSelected: (value) =>
+              DesignSettings.destination.value = value,
+          destinations: const [
+            NavigationDestination(
+              icon: Icon(Icons.grid_view_outlined),
+              selectedIcon: Icon(Icons.grid_view_rounded),
+              label: 'Home',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.receipt_long_outlined),
+              label: 'Invoices',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.people_outline),
+              label: 'Customers',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.inventory_2_outlined),
+              label: 'Products',
+            ),
+            NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _MorePage extends StatelessWidget {
+  const _MorePage();
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('More')),
+    body: ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        const EditorSection(
+          'Your business tools',
+          'Documents, payments and preferences.',
+        ),
+        for (final entry in <(IconData, String, Widget)>[
+          (Icons.description_outlined, 'Quotations', const QuotationsPage()),
+          (Icons.payments_outlined, 'Payments', const PaymentsPage()),
+          (Icons.bar_chart_outlined, 'Reports', const ReportsPage()),
+          (Icons.search, 'Search everything', const GlobalSearchPage()),
+          (
+            Icons.settings_outlined,
+            'Business Profile & Settings',
+            const BusinessSettingsPage(),
+          ),
+        ])
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Card(
+              child: ListTile(
+                contentPadding: const EdgeInsets.all(16),
+                leading: Icon(entry.$1),
+                title: Text(entry.$2),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => _openPage(context, entry.$3),
+              ),
+            ),
+          ),
+        const SizedBox(height: 16),
+        TextButton.icon(
+          onPressed: () async => Supabase.instance.client.auth.signOut(),
+          icon: const Icon(Icons.logout),
+          label: const Text('Log out'),
+        ),
+      ],
+    ),
+  );
 }
 
 class LoginPage extends StatefulWidget {
@@ -1417,7 +1655,7 @@ class _EmailLinkWaitingPageState extends State<EmailLinkWaitingPage> {
       state,
     ) {
       if (state.session != null && mounted) {
-        Navigator.of(context).popUntil((route) => route.isFirst);
+        _returnToDashboard(context);
       }
     });
   }
@@ -1942,7 +2180,7 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
           ],
         ),
       );
-      if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
+      if (mounted) _returnToDashboard(context);
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2126,7 +2364,7 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
               : 'Enter a valid PAN',
         ),
         const SizedBox(height: 12),
-        DropdownButtonFormField<String>(
+        SearchableStateField(
           initialValue:
               _indianStatesAndUnionTerritories.contains(_stateController.text)
               ? _stateController.text
@@ -2150,7 +2388,7 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
               value == null ? 'Select the business state' : null,
         ),
         const SizedBox(height: 12),
-        DropdownButtonFormField<String>(
+        SearchableStateField(
           initialValue:
               _indianStatesAndUnionTerritories.contains(
                 _placeOfSupplyController.text,
@@ -2339,6 +2577,7 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
             child: Column(
               children: [
                 QrImageView(
+                  backgroundColor: Colors.white,
                   data: _upiPaymentUri(
                     _upiController.text,
                     _businessController.text,
@@ -2480,7 +2719,11 @@ class _GlobalSearchPageState extends State<GlobalSearchPage> {
     });
     try {
       final data = await Future.wait([
-        Supabase.instance.client.from('customers').select().limit(100),
+        Supabase.instance.client
+            .from('customers')
+            .select()
+            .eq('is_active', true)
+            .limit(100),
         Supabase.instance.client
             .from('products')
             .select('id, name, product_type, sku, hsn_sac_code, selling_price')
@@ -2674,19 +2917,29 @@ class DashboardPage extends StatefulWidget {
 class _DashboardPageState extends State<DashboardPage> {
   int _invoiceCount = 0;
   int _customerCount = 0;
+  int _productCount = 0;
   double _totalSales = 0;
   double _outstanding = 0;
   List<Map<String, dynamic>> _recentInvoices = [];
   bool _isLoadingSummary = true;
   String? _summaryError;
+  int _summaryRequest = 0;
 
   @override
   void initState() {
     super.initState();
+    invoiceChanges.addListener(_loadSummary);
     _loadSummary();
   }
 
+  @override
+  void dispose() {
+    invoiceChanges.removeListener(_loadSummary);
+    super.dispose();
+  }
+
   Future<void> _loadSummary() async {
+    final request = ++_summaryRequest;
     if (mounted) {
       setState(() {
         _isLoadingSummary = true;
@@ -2700,9 +2953,19 @@ class _DashboardPageState extends State<DashboardPage> {
             .select(
               'invoice_number, customer_name, invoice_date, status, total_amount, balance_amount',
             )
+            .neq('status', 'draft')
+            .neq('status', 'cancelled')
             .order('invoice_date', ascending: false)
+            .order('created_at', ascending: false)
             .limit(100),
-        Supabase.instance.client.from('customers').select('id'),
+        Supabase.instance.client
+            .from('customers')
+            .select('id')
+            .eq('is_active', true),
+        Supabase.instance.client
+            .from('products')
+            .select('id')
+            .eq('is_active', true),
       ]).timeout(const Duration(seconds: 15));
       final invoices = List<Map<String, dynamic>>.from(results[0] as List);
       final customers = List<Map<String, dynamic>>.from(results[1] as List);
@@ -2714,18 +2977,23 @@ class _DashboardPageState extends State<DashboardPage> {
           outstanding += _asDouble(invoice['balance_amount']);
         }
       }
-      if (!mounted) return;
+      if (!mounted || request != _summaryRequest) return;
       setState(() {
         _invoiceCount = invoices.length;
         _customerCount = customers.length;
+        _productCount = (results[2] as List).length;
         _totalSales = totalSales;
         _outstanding = outstanding;
         _recentInvoices = invoices.take(5).toList();
       });
     } catch (error) {
-      if (mounted) setState(() => _summaryError = error.toString());
+      if (mounted && request == _summaryRequest) {
+        setState(() => _summaryError = error.toString());
+      }
     } finally {
-      if (mounted) setState(() => _isLoadingSummary = false);
+      if (mounted && request == _summaryRequest) {
+        setState(() => _isLoadingSummary = false);
+      }
     }
   }
 
@@ -2770,372 +3038,419 @@ class _DashboardPageState extends State<DashboardPage> {
         ],
       ),
 
-      drawer: Drawer(
-        child: SafeArea(
-          child: ListView(
-            padding: EdgeInsets.zero,
-            children: [
-              DrawerHeader(
-                decoration: const BoxDecoration(color: Colors.indigo),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.end,
+      drawer: DesignSettings.modern.value
+          ? null
+          : Drawer(
+              child: SafeArea(
+                child: ListView(
+                  padding: EdgeInsets.zero,
                   children: [
-                    Image.asset(
-                      'assets/branding/simplek-app-icon-hd.png',
-                      width: 48,
-                      height: 48,
-                    ),
-                    const SizedBox(height: 10),
-                    const Text(
-                      'Simplek',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const Text(
-                      'Invoicing made easy',
-                      style: TextStyle(color: Colors.white70),
-                    ),
-                  ],
-                ),
-              ),
-
-              ListTile(
-                leading: const Icon(Icons.dashboard_outlined),
-                title: const Text('Dashboard'),
-                selected: true,
-                onTap: () => Navigator.pop(context),
-              ),
-
-              ListTile(
-                leading: const Icon(Icons.people_outline),
-                title: const Text('Customers'),
-                onTap: () {
-                  final navigator = Navigator.of(context);
-                  navigator.pop();
-                  navigator.push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const CustomersPage(),
-                    ),
-                  );
-                },
-              ),
-
-              ListTile(
-                leading: const Icon(Icons.inventory_2_outlined),
-                title: const Text('Products & Services'),
-                onTap: () => _openPage(context, const ProductsPage()),
-              ),
-
-              ListTile(
-                leading: const Icon(Icons.receipt_long_outlined),
-                title: const Text('Invoices'),
-                onTap: () => _openPage(context, const InvoiceHistoryPage()),
-              ),
-
-              ListTile(
-                leading: const Icon(Icons.description_outlined),
-                title: const Text('Quotations'),
-                onTap: () => _openPage(context, const QuotationsPage()),
-              ),
-
-              ListTile(
-                leading: const Icon(Icons.payments_outlined),
-                title: const Text('Payments'),
-                onTap: () => _openPage(context, const PaymentsPage()),
-              ),
-
-              ListTile(
-                leading: const Icon(Icons.bar_chart_outlined),
-                title: const Text('Reports'),
-                onTap: () => _openPage(context, const ReportsPage()),
-              ),
-
-              const Divider(),
-
-              ListTile(
-                leading: const Icon(Icons.settings_outlined),
-                title: const Text('Business Profile & Settings'),
-                onTap: () => _openPage(context, const BusinessSettingsPage()),
-              ),
-              const Divider(),
-              ListTile(
-                leading: const Icon(Icons.logout),
-                title: const Text('Log out'),
-                onTap: () async {
-                  Navigator.pop(context);
-                  await Supabase.instance.client.auth.signOut();
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
-
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Dashboard',
-              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-            ),
-
-            const SizedBox(height: 4),
-
-            Text(
-              'Here is your business overview',
-              style: TextStyle(color: Colors.grey.shade600, fontSize: 15),
-            ),
-
-            if (_summaryError != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                'Unable to refresh dashboard: $_summaryError',
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ],
-
-            const SizedBox(height: 24),
-
-            // Summary cards
-            Row(
-              children: [
-                Expanded(
-                  child: _summaryCard(
-                    title: 'Total Sales',
-                    value: _money(_totalSales),
-                    icon: Icons.trending_up,
-                    iconColor: Colors.green,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _summaryCard(
-                    title: 'Outstanding',
-                    value: _money(_outstanding),
-                    icon: Icons.account_balance_wallet_outlined,
-                    iconColor: Colors.orange,
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 12),
-
-            Row(
-              children: [
-                Expanded(
-                  child: _summaryCard(
-                    title: 'Invoices',
-                    value: _invoiceCount.toString(),
-                    icon: Icons.receipt_long_outlined,
-                    iconColor: Colors.indigo,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _summaryCard(
-                    title: 'Customers',
-                    value: _customerCount.toString(),
-                    icon: Icons.people_outline,
-                    iconColor: Colors.purple,
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 28),
-
-            const Text(
-              'Quick Actions',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-
-            const SizedBox(height: 14),
-
-            Row(
-              children: [
-                Expanded(
-                  child: _actionButton(
-                    icon: Icons.add,
-                    title: 'New Invoice',
-                    color: Colors.indigo,
-                    onTap: () => _openPage(context, const InvoiceBuilderPage()),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _actionButton(
-                    icon: Icons.person_add_outlined,
-                    title: 'New Customer',
-                    color: Colors.green,
-                    onTap: () {
-                      debugPrint('NEW CUSTOMER TAPPED');
-                      _showCustomerForm(context);
-                    },
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 12),
-
-            Row(
-              children: [
-                Expanded(
-                  child: _actionButton(
-                    icon: Icons.inventory_2_outlined,
-                    title: 'Add Product',
-                    color: Colors.orange,
-                    onTap: () => _openPage(context, const ProductsPage()),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _actionButton(
-                    icon: Icons.payment_outlined,
-                    title: 'Record Payment',
-                    color: Colors.purple,
-                    onTap: () async {
-                      await Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => const PaymentsPage(),
-                        ),
-                      );
-                      await _loadSummary();
-                    },
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 28),
-
-            const Text(
-              'Recent Invoices',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-
-            const SizedBox(height: 14),
-
-            if (_isLoadingSummary)
-              const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(24),
-                  child: CircularProgressIndicator(),
-                ),
-              )
-            else if (_recentInvoices.isEmpty)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(28),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Column(
-                  children: [
-                    Icon(
-                      Icons.receipt_long_outlined,
-                      size: 52,
-                      color: Colors.grey.shade400,
-                    ),
-                    const SizedBox(height: 12),
-                    const Text(
-                      'No invoices yet',
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Create your first invoice to get started.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.grey.shade600),
-                    ),
-                    const SizedBox(height: 18),
-                    FilledButton.icon(
-                      onPressed: () =>
-                          _openPage(context, const InvoiceBuilderPage()),
-                      icon: const Icon(Icons.add),
-                      label: const Text('Create Invoice'),
-                    ),
-                  ],
-                ),
-              )
-            else
-              Card(
-                clipBehavior: Clip.antiAlias,
-                child: Column(
-                  children: List.generate(_recentInvoices.length, (index) {
-                    final invoice = _recentInvoices[index];
-                    final status = invoice['status']?.toString() ?? 'draft';
-                    return Column(
-                      children: [
-                        ListTile(
-                          leading: CircleAvatar(
-                            child: Icon(
-                              status == 'paid'
-                                  ? Icons.check
-                                  : Icons.receipt_long_outlined,
+                    DrawerHeader(
+                      decoration: const BoxDecoration(color: Colors.indigo),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Image.asset(
+                            'assets/branding/simplek-app-icon-hd.png',
+                            width: 48,
+                            height: 48,
+                          ),
+                          const SizedBox(height: 10),
+                          const Text(
+                            'Simplek',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
-                          title: Text(
-                            invoice['invoice_number']?.toString() ?? 'Invoice',
+                          const Text(
+                            'Invoicing made easy',
+                            style: TextStyle(color: Colors.white70),
                           ),
-                          subtitle: Text(
-                            '${invoice['customer_name'] ?? ''} • ${invoice['invoice_date'] ?? ''}\n${status.toUpperCase()}',
+                        ],
+                      ),
+                    ),
+
+                    ListTile(
+                      leading: const Icon(Icons.dashboard_outlined),
+                      title: const Text('Dashboard'),
+                      selected: true,
+                      onTap: () => Navigator.pop(context),
+                    ),
+
+                    ListTile(
+                      leading: const Icon(Icons.people_outline),
+                      title: const Text('Customers'),
+                      onTap: () {
+                        final navigator = Navigator.of(context);
+                        navigator.pop();
+                        navigator.push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const CustomersPage(),
                           ),
-                          isThreeLine: true,
-                          trailing: Text(
-                            _money(_asDouble(invoice['total_amount'])),
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          onTap: () =>
-                              _openPage(context, const InvoiceHistoryPage()),
-                        ),
-                        if (index < _recentInvoices.length - 1)
-                          const Divider(height: 1),
-                      ],
-                    );
-                  }),
+                        );
+                      },
+                    ),
+
+                    ListTile(
+                      leading: const Icon(Icons.inventory_2_outlined),
+                      title: const Text('Products & Services'),
+                      onTap: () => _openPage(context, const ProductsPage()),
+                    ),
+
+                    ListTile(
+                      leading: const Icon(Icons.receipt_long_outlined),
+                      title: const Text('Invoices'),
+                      onTap: () =>
+                          _openPage(context, const InvoiceHistoryPage()),
+                    ),
+
+                    ListTile(
+                      leading: const Icon(Icons.description_outlined),
+                      title: const Text('Quotations'),
+                      onTap: () => _openPage(context, const QuotationsPage()),
+                    ),
+
+                    ListTile(
+                      leading: const Icon(Icons.payments_outlined),
+                      title: const Text('Payments'),
+                      onTap: () => _openPage(context, const PaymentsPage()),
+                    ),
+
+                    ListTile(
+                      leading: const Icon(Icons.bar_chart_outlined),
+                      title: const Text('Reports'),
+                      onTap: () => _openPage(context, const ReportsPage()),
+                    ),
+
+                    const Divider(),
+
+                    ListTile(
+                      leading: const Icon(Icons.settings_outlined),
+                      title: const Text('Business Profile & Settings'),
+                      onTap: () =>
+                          _openPage(context, const BusinessSettingsPage()),
+                    ),
+                    const Divider(),
+                    ListTile(
+                      leading: const Icon(Icons.logout),
+                      title: const Text('Log out'),
+                      onTap: () async {
+                        Navigator.pop(context);
+                        await Supabase.instance.client.auth.signOut();
+                      },
+                    ),
+                  ],
                 ),
               ),
+            ),
 
-            const SizedBox(height: 24),
-
-            // Supabase status
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: Colors.green.shade50,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.green.shade200),
-              ),
-              child: const Row(
+      body: DesignSettings.modern.value
+          ? ModernOverview(
+              sales: _money(_totalSales),
+              outstanding: _money(_outstanding),
+              invoiceCount: '$_invoiceCount',
+              customerCount: '$_customerCount',
+              productCount: '$_productCount',
+              loading: _isLoadingSummary,
+              error: _summaryError,
+              recent: _recentInvoices
+                  .map(
+                    (row) => <String, String>{
+                      'number': row['invoice_number']?.toString() ?? 'Invoice',
+                      'customer': row['customer_name']?.toString() ?? '',
+                      'amount': _money(_asDouble(row['total_amount'])),
+                      'status': row['status']?.toString() ?? 'draft',
+                      'date': row['invoice_date']?.toString() ?? '',
+                    },
+                  )
+                  .toList(),
+              onNewInvoice: () =>
+                  _openPage(context, const InvoiceBuilderPage()),
+              onNewQuotation: () =>
+                  _openPage(context, const QuotationBuilderPage()),
+              onCustomer: () async {
+                await _showCustomerForm(context);
+                if (mounted) await _loadSummary();
+              },
+              onProduct: () => _openPage(context, const AddProductPage()),
+              onInvoices: () => DesignSettings.destination.value = 1,
+              onRefresh: _loadSummary,
+            )
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.cloud_done_outlined, color: Colors.green),
-                  SizedBox(width: 10),
+                  const Text(
+                    'Dashboard',
+                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+                  ),
+
+                  const SizedBox(height: 4),
+
                   Text(
-                    'Supabase connected',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: Colors.green,
+                    'Here is your business overview',
+                    style: TextStyle(color: Colors.grey.shade600, fontSize: 15),
+                  ),
+
+                  if (_summaryError != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      'Unable to refresh dashboard: $_summaryError',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ],
+
+                  const SizedBox(height: 24),
+
+                  // Summary cards
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _summaryCard(
+                          title: 'Total Sales',
+                          value: _money(_totalSales),
+                          icon: Icons.trending_up,
+                          iconColor: Colors.green,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _summaryCard(
+                          title: 'Outstanding',
+                          value: _money(_outstanding),
+                          icon: Icons.account_balance_wallet_outlined,
+                          iconColor: Colors.orange,
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _summaryCard(
+                          title: 'Invoices',
+                          value: _invoiceCount.toString(),
+                          icon: Icons.receipt_long_outlined,
+                          iconColor: Colors.indigo,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _summaryCard(
+                          title: 'Customers',
+                          value: _customerCount.toString(),
+                          icon: Icons.people_outline,
+                          iconColor: Colors.purple,
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 28),
+
+                  const Text(
+                    'Quick Actions',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _actionButton(
+                          icon: Icons.add,
+                          title: 'New Invoice',
+                          color: Colors.indigo,
+                          onTap: () =>
+                              _openPage(context, const InvoiceBuilderPage()),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _actionButton(
+                          icon: Icons.person_add_outlined,
+                          title: 'New Customer',
+                          color: Colors.green,
+                          onTap: () {
+                            debugPrint('NEW CUSTOMER TAPPED');
+                            _showCustomerForm(context);
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _actionButton(
+                          icon: Icons.inventory_2_outlined,
+                          title: 'Add Product',
+                          color: Colors.orange,
+                          onTap: () => _openPage(context, const ProductsPage()),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _actionButton(
+                          icon: Icons.payment_outlined,
+                          title: 'Record Payment',
+                          color: Colors.purple,
+                          onTap: () async {
+                            await Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => const PaymentsPage(),
+                              ),
+                            );
+                            await _loadSummary();
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 28),
+
+                  const Text(
+                    'Recent Invoices',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  if (_isLoadingSummary)
+                    const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(24),
+                        child: CircularProgressIndicator(),
+                      ),
+                    )
+                  else if (_recentInvoices.isEmpty)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(28),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surface,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        children: [
+                          Icon(
+                            Icons.receipt_long_outlined,
+                            size: 52,
+                            color: Colors.grey.shade400,
+                          ),
+                          const SizedBox(height: 12),
+                          const Text(
+                            'No invoices yet',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Create your first invoice to get started.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Colors.grey.shade600),
+                          ),
+                          const SizedBox(height: 18),
+                          FilledButton.icon(
+                            onPressed: () =>
+                                _openPage(context, const InvoiceBuilderPage()),
+                            icon: const Icon(Icons.add),
+                            label: const Text('Create Invoice'),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    Card(
+                      clipBehavior: Clip.antiAlias,
+                      child: Column(
+                        children: List.generate(_recentInvoices.length, (
+                          index,
+                        ) {
+                          final invoice = _recentInvoices[index];
+                          final status =
+                              invoice['status']?.toString() ?? 'draft';
+                          return Column(
+                            children: [
+                              ListTile(
+                                leading: CircleAvatar(
+                                  child: Icon(
+                                    status == 'paid'
+                                        ? Icons.check
+                                        : Icons.receipt_long_outlined,
+                                  ),
+                                ),
+                                title: Text(
+                                  invoice['invoice_number']?.toString() ??
+                                      'Invoice',
+                                ),
+                                subtitle: Text(
+                                  '${invoice['customer_name'] ?? ''} • ${invoice['invoice_date'] ?? ''}\n${status.toUpperCase()}',
+                                ),
+                                isThreeLine: true,
+                                trailing: Text(
+                                  _money(_asDouble(invoice['total_amount'])),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                onTap: () => _openPage(
+                                  context,
+                                  const InvoiceHistoryPage(),
+                                ),
+                              ),
+                              if (index < _recentInvoices.length - 1)
+                                const Divider(height: 1),
+                            ],
+                          );
+                        }),
+                      ),
+                    ),
+
+                  const SizedBox(height: 24),
+
+                  // Supabase status
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.green.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.green.shade200),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.cloud_done_outlined, color: Colors.green),
+                        SizedBox(width: 10),
+                        Text(
+                          'Supabase connected',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: Colors.green,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
               ),
             ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -3258,9 +3573,19 @@ class _CustomersPageState extends State<CustomersPage> {
 
     try {
       await OfflineStore.flush('customers', 'customers');
+      if (mounted) {
+        unawaited(
+          _showSyncRejections(
+            context,
+            'customers',
+            (item) => 'Customer "${item['name'] ?? ''}"',
+          ),
+        );
+      }
       final rows = await Supabase.instance.client
           .from('customers')
           .select()
+          .eq('is_active', true)
           .order('created_at', ascending: false);
       if (!mounted) return;
       final customers = List<Map<String, dynamic>>.from(rows);
@@ -3421,10 +3746,25 @@ class _CustomersPageState extends State<CustomersPage> {
               ),
               title: Text(name),
               subtitle: contact.isEmpty ? null : Text(contact),
-              trailing: IconButton(
-                tooltip: 'Edit customer',
-                onPressed: () => _editCustomer(customer),
-                icon: const Icon(Icons.edit_outlined),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: 'Edit customer',
+                    onPressed: () => _editCustomer(customer),
+                    icon: const Icon(Icons.edit_outlined),
+                  ),
+                  IconButton(
+                    tooltip: 'Delete customer',
+                    icon: const Icon(Icons.delete_outline),
+                    onPressed: () => _removeCatalogEntry(
+                      context,
+                      'customers',
+                      customer,
+                      _loadCustomers,
+                    ),
+                  ),
+                ],
               ),
               onTap: () =>
                   _openPage(context, CustomerHistoryPage(customer: customer)),
@@ -3667,6 +4007,11 @@ class _CustomerHistoryPageState extends State<CustomerHistoryPage> {
 }
 
 class BusinessSettings {
+  static String get _invoiceThemeCacheKey {
+    final user = Supabase.instance.client.auth.currentUser;
+    return 'business_invoice_theme_${user?.id ?? 'signed_out'}';
+  }
+
   static final themeMode = ValueNotifier(ThemeMode.system);
 
   static Future<void> setThemeMode(ThemeMode mode) async {
@@ -3836,6 +4181,8 @@ class BusinessSettings {
       'placeOfSupply': preferences.getString(_placeOfSupplyKey) ?? '',
       'financialYear': preferences.getString(_financialYearKey) ?? '',
       'invoicePrefix': preferences.getString(_invoicePrefixKey) ?? 'INV',
+      'invoiceTheme':
+          preferences.getString(_invoiceThemeCacheKey) ?? 'white-blue',
       'quotationPrefix': preferences.getString(_quotationPrefixKey) ?? 'QTN',
     };
   }
@@ -3895,6 +4242,9 @@ class BusinessSettings {
         'placeOfSupply': row['place_of_supply']?.toString() ?? '',
         'financialYear': row['financial_year']?.toString() ?? '',
         'invoicePrefix': row['invoice_prefix']?.toString() ?? 'INV',
+        'invoiceTheme': InvoicePalette.resolve(
+          user.userMetadata?['invoice_theme']?.toString(),
+        ).id,
         'quotationPrefix': row['quotation_prefix']?.toString() ?? 'QTN',
         'logoPath': logoPath,
         'signaturePath': signaturePath,
@@ -4167,11 +4517,22 @@ class BusinessSettings {
       'qr_object_path': mediaPaths[2],
       'updated_at': DateTime.now().toUtc().toIso8601String(),
     });
+    await Supabase.instance.client.auth.updateUser(
+      UserAttributes(
+        data: {
+          'invoice_theme': InvoicePalette.resolve(value['invoiceTheme']).id,
+        },
+      ),
+    );
   }
 
   static Future<void> _saveLocalProfile(Map<String, String> value) async {
     profile.value = value;
     final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(
+      _invoiceThemeCacheKey,
+      InvoicePalette.resolve(value['invoiceTheme']).id,
+    );
     await preferences.setString(_ownerNameKey, value['ownerName'] ?? '');
     await preferences.setString(_businessNameKey, value['name'] ?? '');
     await preferences.setString(_businessAddressKey, value['address'] ?? '');
@@ -4233,7 +4594,55 @@ class BusinessSettingsPage extends StatefulWidget {
 }
 
 class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
+  Future<void> _previewInvoiceTheme() async {
+    final sample = InvoiceLineItem();
+    sample.productController.text = 'Sample product';
+    sample.quantityController.text = '2';
+    sample.rateController.text = '500';
+    sample.gstRateController.text = '18';
+    final previewProfile = <String, String>{
+      ...BusinessSettings.profile.value,
+      'name': _nameController.text.trim(),
+      'address': _addressController.text.trim(),
+      'phone': _phoneController.text.trim(),
+      'email': _emailController.text.trim(),
+      'gstin': _gstinController.text.trim(),
+      'bankName': _bankNameController.text.trim(),
+      'bankBranch': _branchController.text.trim(),
+      'bankAccount': _accountController.text.trim(),
+      'ifsc': _ifscController.text.trim(),
+      'upiId': _upiController.text.trim(),
+      'logoPath': _logoPath,
+      'signaturePath': _signaturePath,
+      'qrPath': _qrPath,
+      'businessState': _stateController.text.trim(),
+      'invoiceTheme': _invoiceTheme,
+    };
+    try {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => InvoicePreviewPage(
+            customerName: 'Sample Customer',
+            customerPhone: '',
+            customerEmail: '',
+            placeOfSupply: _stateController.text.trim(),
+            invoiceDate: DateTime.now(),
+            dueDate: DateTime.now().add(const Duration(days: 7)),
+            terms: _invoiceTermsController.text,
+            items: [sample],
+            invoiceNumber: 'SAMPLE-001',
+            balanceDue: 1180,
+            previewProfile: previewProfile,
+          ),
+        ),
+      );
+    } finally {
+      sample.dispose();
+    }
+  }
+
   final _formKey = GlobalKey<FormState>();
+  late String _invoiceTheme;
   late final TextEditingController _quotationTermsController;
   late final TextEditingController _invoiceTermsController;
   late final TextEditingController _ownerController;
@@ -4271,6 +4680,7 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
       text: BusinessSettings.invoiceTerms.value,
     );
     final profile = BusinessSettings.profile.value;
+    _invoiceTheme = InvoicePalette.resolve(profile['invoiceTheme']).id;
     _ownerController = TextEditingController(text: profile['ownerName']);
     _nameController = TextEditingController(text: profile['name']);
     _addressController = TextEditingController(text: profile['address']);
@@ -4378,6 +4788,7 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
       'financialYear': _financialYearController.text.trim(),
       'invoicePrefix': _invoicePrefixController.text.trim().toUpperCase(),
       'quotationPrefix': _quotationPrefixController.text.trim().toUpperCase(),
+      'invoiceTheme': _invoiceTheme,
     });
     if (!mounted) return;
     ScaffoldMessenger.of(
@@ -4460,6 +4871,8 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                const DesignSelector(),
+                const SizedBox(height: 24),
                 ValueListenableBuilder<ThemeMode>(
                   valueListenable: BusinessSettings.themeMode,
                   builder: (context, mode, _) =>
@@ -4489,6 +4902,43 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
                           }
                         },
                       ),
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'Invoice colours',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: InvoicePalette.options
+                      .map(
+                        (palette) => ChoiceChip(
+                          label: Text(palette.label),
+                          avatar: CircleAvatar(
+                            backgroundColor: palette.inkColor,
+                            child: Icon(
+                              Icons.receipt_outlined,
+                              color: palette.paperColor,
+                              size: 18,
+                            ),
+                          ),
+                          selected: _invoiceTheme == palette.id,
+                          onSelected: (_) =>
+                              setState(() => _invoiceTheme = palette.id),
+                        ),
+                      )
+                      .toList(),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: _previewInvoiceTheme,
+                  icon: const Icon(Icons.preview_outlined),
+                  label: const Text('Preview invoice format'),
+                ),
+                const Text(
+                  'Save business profile to use this format for your invoices.',
                 ),
                 const SizedBox(height: 24),
                 Text(
@@ -4629,7 +5079,7 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
                       setState(() => _gstRegistrationType = value!),
                 ),
                 const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
+                SearchableStateField(
                   initialValue:
                       _indianStatesAndUnionTerritories.contains(
                         _stateController.text,
@@ -4651,7 +5101,7 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
                   validator: (value) => value == null ? 'Select a state' : null,
                 ),
                 const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
+                SearchableStateField(
                   initialValue:
                       _indianStatesAndUnionTerritories.contains(
                         _placeOfSupplyController.text,
@@ -4763,6 +5213,7 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
                     child: Column(
                       children: [
                         QrImageView(
+                          backgroundColor: Colors.white,
                           data: _upiPaymentUri(
                             _upiController.text,
                             _nameController.text,
@@ -5014,7 +5465,10 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
               children: [
                 Expanded(
                   child: path.isNotEmpty && File(path).existsSync()
-                      ? Image.file(File(path), fit: BoxFit.contain)
+                      ? ColoredBox(
+                          color: Colors.white,
+                          child: Image.file(File(path), fit: BoxFit.contain),
+                        )
                       : const Icon(Icons.add_photo_alternate_outlined),
                 ),
                 Text(label, overflow: TextOverflow.ellipsis),
@@ -5072,6 +5526,17 @@ class _PaymentsPageState extends State<PaymentsPage> {
   Future<void> _load() async {
     try {
       final syncedPayments = await OfflineStore.flushPayments();
+      if (mounted) {
+        unawaited(
+          _showSyncRejections(
+            context,
+            'payments',
+            (item) =>
+                'Payment of ₹${item['p_amount']}'
+                '${item['_label'] == null ? '' : ' on invoice ${item['_label']}'}',
+          ),
+        );
+      }
       final rows = await Supabase.instance.client
           .from('invoices')
           .select(
@@ -5103,14 +5568,19 @@ class _PaymentsPageState extends State<PaymentsPage> {
   Future<void> _save() async {
     if (!_formKey.currentState!.validate() || _invoiceId == null) return;
     setState(() => _saving = true);
+    // The same request id is used for the online attempt and any offline retry,
+    // so a payment whose response was lost cannot be recorded twice.
+    final params = <String, dynamic>{
+      'p_invoice_id': _invoiceId,
+      'p_amount': double.tryParse(_amountController.text.trim()) ?? 0,
+      'p_payment_method': _method,
+      'p_payment_date': DateTime.now().toIso8601String().substring(0, 10),
+      'p_client_request_id': const Uuid().v4(),
+    };
     try {
       await Supabase.instance.client.rpc(
         'record_invoice_payment',
-        params: {
-          'p_invoice_id': _invoiceId,
-          'p_amount': double.parse(_amountController.text.trim()),
-          'p_payment_method': _method,
-        },
+        params: params,
       );
       if (!mounted) return;
       _amountController.clear();
@@ -5120,10 +5590,14 @@ class _PaymentsPageState extends State<PaymentsPage> {
       await _load();
     } catch (e) {
       if (_isOfflineError(e)) {
+        final invoiceId = params['p_invoice_id'];
         await OfflineStore.enqueue('payments', {
-          'p_invoice_id': _invoiceId,
-          'p_amount': double.parse(_amountController.text.trim()),
-          'p_payment_method': _method,
+          ...params,
+          '_queue_id': params['p_client_request_id'],
+          '_label': _invoices
+              .where((invoice) => invoice['id'].toString() == invoiceId)
+              .map((invoice) => invoice['invoice_number']?.toString() ?? '')
+              .firstOrNull,
         });
         if (mounted) {
           _amountController.clear();
@@ -6268,8 +6742,7 @@ class _QuotationsPageState extends State<QuotationsPage> {
       );
       return;
     }
-    final user = Supabase.instance.client.auth.currentUser;
-    if (user == null) {
+    if (Supabase.instance.client.auth.currentUser == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Your session has expired. Please sign in again.'),
@@ -6278,85 +6751,22 @@ class _QuotationsPageState extends State<QuotationsPage> {
       return;
     }
     try {
-      final items = await Supabase.instance.client
-          .from('quotation_items')
-          .select(
-            'product_id, item_name, quantity, uqc_code, unit_price, taxable_amount, gst_rate, tax_amount, cgst_amount, sgst_amount, igst_amount, total_amount',
-          )
-          .eq('quotation_id', quotation['id']);
-      final invoiceNumber =
-          await Supabase.instance.client.rpc(
-                'next_invoice_number',
-                params: {
-                  'p_prefix':
-                      BusinessSettings.profile.value['invoicePrefix'] ?? 'INV',
-                  'p_invoice_date': DateTime.now().toIso8601String().substring(
-                    0,
-                    10,
-                  ),
-                  'p_financial_year':
-                      BusinessSettings.profile.value['financialYear'] ?? '',
-                },
-              )
-              as String;
-      final total = _asDouble(quotation['total_amount']);
-      final invoice = await Supabase.instance.client
-          .from('invoices')
-          .insert({
-            'user_id': user.id,
-            'invoice_number': invoiceNumber,
-            'customer_name': quotation['customer_name'],
-            'invoice_date': DateTime.now().toIso8601String().substring(0, 10),
-            'status': 'draft',
-            'subtotal': items.fold<double>(
-              0,
-              (sum, row) => sum + _asDouble(row['taxable_amount']),
-            ),
-            'tax_amount': items.fold<double>(
-              0,
-              (sum, row) => sum + _asDouble(row['tax_amount']),
-            ),
-            'total_amount': total,
-            'balance_amount': total,
-            'terms': quotation['terms'],
-            'place_of_supply': quotation['place_of_supply'],
-            'tax_type': _asDouble(quotation['igst_amount']) > 0
-                ? 'igst'
-                : 'cgst_sgst',
-            'cgst_amount': _asDouble(quotation['cgst_amount']),
-            'sgst_amount': _asDouble(quotation['sgst_amount']),
-            'igst_amount': _asDouble(quotation['igst_amount']),
-          })
-          .select('*')
-          .single();
-      await Supabase.instance.client
-          .from('invoice_items')
-          .insert(
-            List<Map<String, dynamic>>.from(items)
-                .map(
-                  (item) => {
-                    'invoice_id': invoice['id'],
-                    'product_id': item['product_id'],
-                    'product_name': item['item_name'],
-                    'item_name': item['item_name'],
-                    'quantity': item['quantity'],
-                    'uqc_code': item['uqc_code'],
-                    'unit_price': item['unit_price'],
-                    'taxable_amount': item['taxable_amount'],
-                    'gst_rate': item['gst_rate'],
-                    'tax_amount': item['tax_amount'],
-                    'cgst_amount': item['cgst_amount'],
-                    'sgst_amount': item['sgst_amount'],
-                    'igst_amount': item['igst_amount'],
-                    'total_amount': item['total_amount'],
-                  },
-                )
-                .toList(),
-          );
-      await Supabase.instance.client
-          .from('quotations')
-          .update({'status': 'accepted', 'converted_invoice_id': invoice['id']})
-          .eq('id', quotation['id']);
+      final invoice = Map<String, dynamic>.from(
+        await Supabase.instance.client.rpc(
+              'convert_quotation_to_invoice',
+              params: {
+                'p_quotation_id': quotation['id'],
+                'p_invoice_date': DateTime.now().toIso8601String().substring(
+                  0,
+                  10,
+                ),
+                'p_number_prefix':
+                    BusinessSettings.profile.value['invoicePrefix'] ?? 'INV',
+              },
+            )
+            as Map,
+      );
+      final invoiceNumber = invoice['invoice_number'];
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -6380,10 +6790,6 @@ class _QuotationsPageState extends State<QuotationsPage> {
       }
     }
   }
-
-  double _asDouble(dynamic value) => value is num
-      ? value.toDouble()
-      : double.tryParse(value?.toString() ?? '') ?? 0;
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -6537,6 +6943,8 @@ class QuotationBuilderPage extends StatefulWidget {
 }
 
 class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
+  final _numberController = TextEditingController();
+  String? _numberError;
   final _formKey = GlobalKey<FormState>();
   final _customerController = TextEditingController();
   final _placeOfSupplyController = TextEditingController(
@@ -6561,6 +6969,10 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
     _customerOptions = _loadCustomerOptions();
     _productOptions = _loadProductOptions();
     _quotationDate = DateTime.now();
+    if (_isEditing) {
+      _numberController.text =
+          widget.quotation!['quotation_number']?.toString() ?? '';
+    }
     _validUntil = DateTime.now().add(const Duration(days: 30));
     if (widget.quotation != null) _loadExistingQuotation();
   }
@@ -6570,6 +6982,7 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
         await Supabase.instance.client
             .from('customers')
             .select('name, phone, email, gstin, state')
+            .eq('is_active', true)
             .order('name')
             .limit(500),
       );
@@ -6611,6 +7024,7 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
 
   @override
   void dispose() {
+    _numberController.dispose();
     _customerController.dispose();
     _placeOfSupplyController.dispose();
     _termsController.dispose();
@@ -6709,8 +7123,12 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
   }
 
   Future<void> _save({required bool openPreview}) async {
+    if (_saving) return;
     if (!_formKey.currentState!.validate()) return;
-    setState(() => _saving = true);
+    setState(() {
+      _saving = true;
+      _numberError = null;
+    });
     try {
       final data = {
         'customer_name': _customerController.text.trim(),
@@ -6729,11 +7147,12 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
       late final String number;
       late final Map<String, dynamic> quote;
       if (_isEditing) {
-        number =
-            widget.quotation!['quotation_number']?.toString() ?? 'Quotation';
+        number = _numberController.text.trim().isNotEmpty
+            ? _numberController.text.trim().toUpperCase()
+            : widget.quotation!['quotation_number'].toString();
         quote = await Supabase.instance.client
             .from('quotations')
-            .update(data)
+            .update({...data, 'quotation_number': number})
             .eq('id', widget.quotation!['id'])
             .select('*')
             .single();
@@ -6742,19 +7161,20 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
             .delete()
             .eq('quotation_id', quote['id']);
       } else {
-        number =
-            await Supabase.instance.client.rpc(
-                  'next_quotation_number',
-                  params: {
-                    'p_prefix':
-                        BusinessSettings.profile.value['quotationPrefix'] ??
-                        'QTN',
-                    'p_quotation_date': _dbDate(_quotationDate),
-                    'p_financial_year':
-                        BusinessSettings.profile.value['financialYear'] ?? '',
-                  },
-                )
-                as String;
+        number = _numberController.text.trim().isNotEmpty
+            ? _numberController.text.trim().toUpperCase()
+            : await Supabase.instance.client.rpc(
+                    'next_quotation_number',
+                    params: {
+                      'p_prefix':
+                          BusinessSettings.profile.value['quotationPrefix'] ??
+                          'QTN',
+                      'p_quotation_date': _dbDate(_quotationDate),
+                      'p_financial_year':
+                          BusinessSettings.profile.value['financialYear'] ?? '',
+                    },
+                  )
+                  as String;
         quote = await Supabase.instance.client
             .from('quotations')
             .insert({...data, 'quotation_number': number, 'status': 'draft'})
@@ -6799,13 +7219,29 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
           ),
         );
       } else {
-        Navigator.of(context).popUntil((route) => route.isFirst);
+        _returnToDashboard(context);
       }
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Unable to save quotation: $error')),
+          SnackBar(
+            content: Text(
+              error is PostgrestException && error.code == '23505'
+                  ? 'This quotation number is already used. Please use a different number.'
+                  : 'Unable to save quotation: $error',
+            ),
+            backgroundColor:
+                error is PostgrestException && error.code == '23505'
+                ? Colors.red.shade800
+                : null,
+          ),
         );
+        if (error is PostgrestException && error.code == '23505') {
+          setState(
+            () => _numberError =
+                'This quotation number is already used. Please use a different number.',
+          );
+        }
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -6820,6 +7256,7 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
         await Supabase.instance.client
             .from('customers')
             .select('name, phone, email, gstin, state')
+            .eq('is_active', true)
             .order('name')
             .limit(200),
       );
@@ -6908,6 +7345,13 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
     appBar: AppBar(
       title: Text(_isEditing ? 'Edit Quotation' : 'New Quotation'),
     ),
+    bottomNavigationBar: DesignSettings.modern.value && !_loadingExisting
+        ? DocumentSaveBar(
+            saving: _saving,
+            onClose: () => _save(openPreview: false),
+            onNext: () => _save(openPreview: true),
+          )
+        : null,
     body: _loadingExisting
         ? const Center(child: CircularProgressIndicator())
         : Form(
@@ -6915,6 +7359,24 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
               children: [
+                if (DesignSettings.modern.value)
+                  const EditorSection(
+                    'Prepare your quotation',
+                    'Choose a customer, add items and review your totals.',
+                  ),
+                TextFormField(
+                  controller: _numberController,
+                  enabled: !_saving,
+                  validator: validateDocumentNumber,
+                  decoration: InputDecoration(
+                    labelText: 'Quotation number (optional)',
+                    helperText:
+                        'Leave blank for automatic numbering for your business.',
+                    errorText: _numberError,
+                  ),
+                  onChanged: (_) => setState(() => _numberError = null),
+                ),
+                const SizedBox(height: 12),
                 _RecordAutocompleteField(
                   controller: _customerController,
                   loadOptions: () => _customerOptions,
@@ -6932,7 +7394,7 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
                   leadingIcon: Icons.person_search_outlined,
                 ),
                 const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
+                SearchableStateField(
                   key: ValueKey(_placeOfSupplyController.text),
                   initialValue:
                       _indianStatesAndUnionTerritories.contains(
@@ -7021,47 +7483,50 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                TextField(
-                  controller: _termsController,
-                  minLines: 3,
-                  maxLines: 6,
-                  decoration: const InputDecoration(
-                    labelText: 'Terms and conditions',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
+                DesignSettings.modern.value
+                    ? EditableTerms(controller: _termsController)
+                    : TextField(
+                        controller: _termsController,
+                        minLines: 3,
+                        maxLines: 6,
+                        decoration: const InputDecoration(
+                          labelText: 'Terms and conditions',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
                 const SizedBox(height: 24),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: _saving
-                            ? null
-                            : () => _save(openPreview: false),
-                        icon: const Icon(Icons.close_outlined),
-                        label: const Text('Save & Close'),
+                if (!DesignSettings.modern.value)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _saving
+                              ? null
+                              : () => _save(openPreview: false),
+                          icon: const Icon(Icons.close_outlined),
+                          label: const Text('Save & Close'),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: _saving
-                            ? null
-                            : () => _save(openPreview: true),
-                        icon: _saving
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.arrow_forward_outlined),
-                        label: Text(_saving ? 'Saving...' : 'Save & Next'),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: _saving
+                              ? null
+                              : () => _save(openPreview: true),
+                          icon: _saving
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.arrow_forward_outlined),
+                          label: Text(_saving ? 'Saving...' : 'Save & Next'),
+                        ),
                       ),
-                    ),
-                  ],
-                ),
+                    ],
+                  ),
               ],
             ),
           ),
@@ -7334,6 +7799,10 @@ class _QuotationPreviewPageState extends State<QuotationPreviewPage> {
               style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
             ),
           ),
+          pw.SizedBox(height: 10),
+          pw.Text(
+            'Amount in words: ${amountInWords(_amount(widget.quotation['total_amount']))}',
+          ),
           if ((widget.quotation['terms']?.toString() ?? '')
               .trim()
               .isNotEmpty) ...[
@@ -7427,7 +7896,7 @@ class _QuotationPreviewPageState extends State<QuotationPreviewPage> {
       title: const Text('Quotation Preview'),
       actions: [
         TextButton(
-          onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
+          onPressed: () => _returnToDashboard(context),
           child: const Text('Close'),
         ),
       ],
@@ -7453,38 +7922,44 @@ class _QuotationPreviewPageState extends State<QuotationPreviewPage> {
               ),
             ),
           ),
-    bottomNavigationBar: SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _items.isEmpty ? null : _openWhatsApp,
-                icon: const Icon(Icons.chat_outlined),
-                label: const Text('WhatsApp'),
+    bottomNavigationBar: DesignSettings.modern.value
+        ? DocumentShareBar(
+            onWhatsApp: _items.isEmpty ? null : _openWhatsApp,
+            onEmail: _items.isEmpty ? null : _openEmail,
+            onShare: _items.isEmpty ? null : _share,
+          )
+        : SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _items.isEmpty ? null : _openWhatsApp,
+                      icon: const Icon(Icons.chat_outlined),
+                      label: const Text('WhatsApp'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _items.isEmpty ? null : _openEmail,
+                      icon: const Icon(Icons.email_outlined),
+                      label: const Text('Email'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _items.isEmpty ? null : _share,
+                      icon: const Icon(Icons.share_outlined),
+                      label: const Text('Share PDF'),
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _items.isEmpty ? null : _openEmail,
-                icon: const Icon(Icons.email_outlined),
-                label: const Text('Email'),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: FilledButton.icon(
-                onPressed: _items.isEmpty ? null : _share,
-                icon: const Icon(Icons.share_outlined),
-                label: const Text('Share PDF'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    ),
+          ),
   );
 }
 
@@ -7513,6 +7988,16 @@ class _InvoiceHistoryPageState extends State<InvoiceHistoryPage> {
     });
     try {
       final syncedDrafts = await OfflineStore.flushInvoiceDrafts();
+      if (mounted) {
+        unawaited(
+          _showSyncRejections(
+            context,
+            'invoice_drafts',
+            (item) =>
+                'Invoice for ${(item['header'] as Map?)?['customer_name'] ?? 'a customer'}',
+          ),
+        );
+      }
       final rows = await Supabase.instance.client
           .from('invoices')
           .select(
@@ -7706,6 +8191,13 @@ class InvoiceBuilderPage extends StatefulWidget {
 }
 
 class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
+  /// Lets a retry of this save find the invoice instead of creating another.
+  final String _newInvoiceId = const Uuid().v4();
+
+  final _numberController = TextEditingController();
+  String? _numberError;
+  String _customerAddress = '';
+  String _selectedCustomerName = '';
   int _customerListVersion = 0;
   final _formKey = GlobalKey<FormState>();
   final _customerController = TextEditingController();
@@ -7728,12 +8220,26 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
 
   bool get _isEditing => widget.sourceInvoice != null && widget.editExisting;
 
+  void _clearChangedCustomer() {
+    if (_customerController.text.trim() == _selectedCustomerName) return;
+    _selectedCustomerName = '';
+    _customerAddress = '';
+    _customerPhoneController.clear();
+    _customerEmailController.clear();
+    _customerGstinController.clear();
+  }
+
   @override
   void initState() {
     super.initState();
     _customerOptions = _loadCustomerOptions();
+    _customerController.addListener(_clearChangedCustomer);
     _productOptions = _loadProductOptions();
     _invoiceDate = DateTime.now();
+    if (_isEditing) {
+      _numberController.text =
+          widget.sourceInvoice!['invoice_number']?.toString() ?? '';
+    }
     _dueDate = _defaultDueDate(
       _invoiceDate,
       BusinessSettings.defaultDueDay.value,
@@ -7745,7 +8251,8 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
       List<Map<String, dynamic>>.from(
         await Supabase.instance.client
             .from('customers')
-            .select('name, phone, email, gstin, state')
+            .select('name, phone, email, gstin, state, address')
+            .eq('is_active', true)
             .order('name')
             .limit(500),
       );
@@ -7764,6 +8271,8 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
 
   void _selectInvoiceCustomer(Map<String, dynamic> selected) {
     setState(() {
+      _selectedCustomerName = selected['name']?.toString().trim() ?? '';
+      _customerAddress = selected['address']?.toString() ?? '';
       _customerController.text = selected['name']?.toString() ?? '';
       _customerPhoneController.text = selected['phone']?.toString() ?? '';
       _customerEmailController.text = selected['email']?.toString() ?? '';
@@ -7819,14 +8328,16 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
     setState(() => _loadingSource = true);
     try {
       final source = widget.sourceInvoice!;
+      _selectedCustomerName = source['customer_name']?.toString().trim() ?? '';
       _customerController.text = source['customer_name']?.toString() ?? '';
       final contacts = await Supabase.instance.client
           .from('customers')
-          .select('phone, email')
+          .select('phone, email, address')
           .eq('name', _customerController.text)
           .limit(2);
       if (!mounted) return;
       if (contacts.length == 1) {
+        _customerAddress = contacts.first['address']?.toString() ?? '';
         _customerPhoneController.text =
             contacts.first['phone']?.toString() ?? '';
         _customerEmailController.text =
@@ -7885,6 +8396,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
 
   @override
   void dispose() {
+    _numberController.dispose();
     _customerController.dispose();
     _customerPhoneController.dispose();
     _customerEmailController.dispose();
@@ -7916,7 +8428,48 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
   String _dateForDatabase(DateTime date) =>
       '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
 
+  /// The fields of this invoice the server accepts. Status, balance and paid
+  /// amount are always decided by the server.
+  Map<String, dynamic> _invoiceHeaderPayload() => {
+    'invoice_number': _numberController.text.trim().toUpperCase(),
+    'customer_name': _customerController.text.trim(),
+    'customer_gstin': _customerGstinController.text.trim().toUpperCase(),
+    'invoice_date': _dateForDatabase(_invoiceDate),
+    'due_date': _dueDate == null ? null : _dateForDatabase(_dueDate!),
+    'subtotal': _subtotal,
+    'tax_amount': _taxTotal,
+    'total_amount': _grandTotal,
+    'terms': _termsController.text.trim(),
+    'place_of_supply': _placeOfSupplyController.text.trim(),
+    'tax_type': _taxTotal == 0
+        ? 'none'
+        : (_isIntraState ? 'cgst_sgst' : 'igst'),
+    'cgst_amount': _cgstTotal,
+    'sgst_amount': _sgstTotal,
+    'igst_amount': _igstTotal,
+  };
+
+  List<Map<String, dynamic>> _invoiceItemsPayload() => _items
+      .map(
+        (item) => <String, dynamic>{
+          'product_id': item.productId,
+          'item_name': item.productController.text.trim(),
+          'quantity': item.quantity,
+          'uqc_code': item.uqcCode,
+          'unit_price': item.rate,
+          'taxable_amount': item.taxableAmount,
+          'gst_rate': item.gstRate,
+          'tax_amount': item.taxAmount,
+          'cgst_amount': _isIntraState ? item.taxAmount / 2 : 0,
+          'sgst_amount': _isIntraState ? item.taxAmount / 2 : 0,
+          'igst_amount': _isIntraState ? 0 : item.taxAmount,
+          'total_amount': item.total,
+        },
+      )
+      .toList();
+
   Future<void> _saveDraft({required bool openPreview}) async {
+    if (_isSavingDraft) return;
     if (!_formKey.currentState!.validate()) return;
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) {
@@ -7927,163 +8480,53 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
       );
       return;
     }
-    setState(() => _isSavingDraft = true);
+    setState(() {
+      _isSavingDraft = true;
+      _numberError = null;
+    });
     var saved = false;
     String savedNumber = 'Pending sync';
     try {
-      final invoiceNumber = _isEditing
-          ? widget.sourceInvoice!['invoice_number']?.toString() ?? 'Invoice'
-          : await Supabase.instance.client.rpc(
-                  'next_invoice_number',
-                  params: {
-                    'p_prefix':
-                        BusinessSettings.profile.value['invoicePrefix'] ??
-                        'INV',
-                    'p_invoice_date': _dateForDatabase(_invoiceDate),
-                    'p_financial_year':
-                        BusinessSettings.profile.value['financialYear'] ?? '',
-                  },
-                )
-                as String;
-      final invoiceData = <String, dynamic>{
-        'user_id': user.id,
-        'invoice_number': invoiceNumber,
-        'customer_name': _customerController.text.trim(),
-        'customer_gstin': _customerGstinController.text.trim().toUpperCase(),
-        'invoice_date': _dateForDatabase(_invoiceDate),
-        'due_date': _dueDate == null ? null : _dateForDatabase(_dueDate!),
-        'status': 'draft',
-        'subtotal': _subtotal,
-        'tax_amount': _taxTotal,
-        'total_amount': _grandTotal,
-        'balance_amount': _isEditing
-            ? (_grandTotal -
-                      ((widget.sourceInvoice!['paid_amount'] as num?)
-                              ?.toDouble() ??
-                          0))
-                  .clamp(0, double.infinity)
-            : _grandTotal,
-        'terms': _termsController.text.trim(),
-        'place_of_supply': _placeOfSupplyController.text.trim(),
-        'tax_type': _taxTotal == 0
-            ? 'none'
-            : (_isIntraState ? 'cgst_sgst' : 'igst'),
-        'cgst_amount': _cgstTotal,
-        'sgst_amount': _sgstTotal,
-        'igst_amount': _igstTotal,
-      };
-      late final Map<String, dynamic> invoice;
-      if (_isEditing) {
-        invoice = await Supabase.instance.client
-            .from('invoices')
-            .update(invoiceData)
-            .eq('id', widget.sourceInvoice!['id'])
-            .select('id')
-            .single();
-        await Supabase.instance.client
-            .from('invoice_items')
-            .delete()
-            .eq('invoice_id', invoice['id']);
-      } else {
-        invoice = await Supabase.instance.client
-            .from('invoices')
-            .insert(invoiceData)
-            .select('id')
-            .single();
-      }
-      final invoiceId = invoice['id'];
-      await Supabase.instance.client
-          .from('invoice_items')
-          .insert(
-            _items
-                .map(
-                  (item) => {
-                    'invoice_id': invoiceId,
-                    'product_id': item.productId,
-                    // Older deployments require this legacy field; keep it in sync
-                    // with the current item_name field for backward compatibility.
-                    'product_name': item.productController.text.trim(),
-                    'item_name': item.productController.text.trim(),
-                    'quantity': item.quantity,
-                    'uqc_code': item.uqcCode,
-                    'unit_price': item.rate,
-                    'taxable_amount': item.taxableAmount,
-                    'gst_rate': item.gstRate,
-                    'tax_amount': item.taxAmount,
-                    'cgst_amount': _isIntraState ? item.taxAmount / 2 : 0,
-                    'sgst_amount': _isIntraState ? item.taxAmount / 2 : 0,
-                    'igst_amount': _isIntraState ? 0 : item.taxAmount,
-                    'total_amount': item.total,
-                  },
-                )
-                .toList(),
-          );
+      final invoice = Map<String, dynamic>.from(
+        await Supabase.instance.client.rpc(
+              'save_invoice',
+              params: {
+                'p_invoice_id': _isEditing
+                    ? widget.sourceInvoice!['id']
+                    : _newInvoiceId,
+                'p_header': _invoiceHeaderPayload(),
+                'p_items': _invoiceItemsPayload(),
+                'p_is_edit': _isEditing,
+                'p_number_prefix':
+                    BusinessSettings.profile.value['invoicePrefix'] ?? 'INV',
+              },
+            )
+            as Map,
+      );
+      final invoiceNumber = invoice['invoice_number'] as String;
+      invoiceChanges.value++;
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             _isEditing
                 ? 'Invoice $invoiceNumber updated successfully'
-                : 'Draft $invoiceNumber saved successfully',
+                : 'Invoice $invoiceNumber saved successfully',
           ),
         ),
       );
       saved = true;
       savedNumber = invoiceNumber;
     } catch (e) {
-      if (_isOfflineError(e) && !_isEditing) {
-        final invoiceId = const Uuid().v4();
-        final header = <String, dynamic>{
-          'id': invoiceId,
-          'user_id': user.id,
-          'customer_name': _customerController.text.trim(),
-          'customer_gstin': _customerGstinController.text.trim().toUpperCase(),
-          'invoice_date': _dateForDatabase(_invoiceDate),
-          'due_date': _dueDate == null ? null : _dateForDatabase(_dueDate!),
-          'status': 'draft',
-          'subtotal': _subtotal,
-          'tax_amount': _taxTotal,
-          'total_amount': _grandTotal,
-          'balance_amount': _grandTotal,
-          'terms': _termsController.text.trim(),
-          'place_of_supply': _placeOfSupplyController.text.trim(),
-          'tax_type': _taxTotal == 0
-              ? 'none'
-              : (_isIntraState ? 'cgst_sgst' : 'igst'),
-          'cgst_amount': _cgstTotal,
-          'sgst_amount': _sgstTotal,
-          'igst_amount': _igstTotal,
-        };
-        final items = _items
-            .map(
-              (item) => <String, dynamic>{
-                'id': const Uuid().v4(),
-                'invoice_id': invoiceId,
-                'product_id': item.productId,
-                'product_name': item.productController.text.trim(),
-                'item_name': item.productController.text.trim(),
-                'quantity': item.quantity,
-                'uqc_code': item.uqcCode,
-                'unit_price': item.rate,
-                'taxable_amount': item.taxableAmount,
-                'gst_rate': item.gstRate,
-                'tax_amount': item.taxAmount,
-                'cgst_amount': _isIntraState ? item.taxAmount / 2 : 0,
-                'sgst_amount': _isIntraState ? item.taxAmount / 2 : 0,
-                'igst_amount': _isIntraState ? 0 : item.taxAmount,
-                'total_amount': item.total,
-              },
-            )
-            .toList();
+      if (_isOfflineError(e) &&
+          !_isEditing &&
+          _numberController.text.trim().isEmpty) {
         await OfflineStore.enqueue('invoice_drafts', {
-          'header': header,
-          'items': items,
+          'header': {..._invoiceHeaderPayload(), 'id': _newInvoiceId},
+          'items': _invoiceItemsPayload(),
           'number_params': {
             'p_prefix':
                 BusinessSettings.profile.value['invoicePrefix'] ?? 'INV',
-            'p_invoice_date': _dateForDatabase(_invoiceDate),
-            'p_financial_year':
-                BusinessSettings.profile.value['financialYear'] ?? '',
           },
         });
         saved = true;
@@ -8091,15 +8534,24 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
-                'Invoice draft saved offline and will sync automatically',
+                'Invoice saved offline; it will be finalized when synced',
               ),
             ),
           );
         }
       } else if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Unable to save draft: $e')));
+        if (e is PostgrestException && e.code == '23505') {
+          setState(
+            () => _numberError =
+                'This invoice number is already used. Please use a different number.',
+          );
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_numberError ?? 'Unable to save invoice: $e'),
+            backgroundColor: _numberError == null ? null : Colors.red.shade800,
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _isSavingDraft = false);
@@ -8119,6 +8571,8 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                     .clamp(0, double.infinity)
                     .toDouble(),
             customerName: _customerController.text.trim(),
+            customerAddress: _customerAddress,
+            customerGstin: _customerGstinController.text.trim(),
             customerPhone: _customerPhoneController.text.trim(),
             customerEmail: _customerEmailController.text.trim(),
             placeOfSupply: _placeOfSupplyController.text.trim(),
@@ -8137,7 +8591,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
         return;
       }
     }
-    Navigator.of(context).popUntil((route) => route.isFirst);
+    _returnToDashboard(context);
   }
 
   Future<void> _pickDate({required bool isDueDate}) async {
@@ -8177,7 +8631,8 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
     try {
       final rows = await Supabase.instance.client
           .from('customers')
-          .select('name, phone, email, gstin, state')
+          .select('name, phone, email, gstin, state, address')
+          .eq('is_active', true)
           .order('name')
           .limit(100);
       if (!mounted) return;
@@ -8212,6 +8667,8 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
       );
       if (selected == null || !mounted) return;
       setState(() {
+        _selectedCustomerName = selected['name']?.toString().trim() ?? '';
+        _customerAddress = selected['address']?.toString() ?? '';
         _customerController.text = selected['name']?.toString() ?? '';
         _customerPhoneController.text = selected['phone']?.toString() ?? '';
         _customerEmailController.text = selected['email']?.toString() ?? '';
@@ -8345,6 +8802,13 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
               : 'Duplicate Invoice',
         ),
       ),
+      bottomNavigationBar: DesignSettings.modern.value && !_loadingSource
+          ? DocumentSaveBar(
+              saving: _isSavingDraft,
+              onClose: () => _saveDraft(openPreview: false),
+              onNext: () => _saveDraft(openPreview: true),
+            )
+          : null,
       body: _loadingSource
           ? const Center(child: CircularProgressIndicator())
           : Form(
@@ -8352,6 +8816,24 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
                 children: [
+                  if (DesignSettings.modern.value)
+                    const EditorSection(
+                      'Create your invoice',
+                      'Add a customer and items. Review before saving.',
+                    ),
+                  TextFormField(
+                    controller: _numberController,
+                    enabled: !_isSavingDraft,
+                    validator: validateDocumentNumber,
+                    decoration: InputDecoration(
+                      labelText: 'Invoice number (optional)',
+                      helperText:
+                          'Leave blank for automatic numbering for your business.',
+                      errorText: _numberError,
+                    ),
+                    onChanged: (_) => setState(() => _numberError = null),
+                  ),
+                  const SizedBox(height: 12),
                   _RecordAutocompleteField(
                     key: ValueKey(_customerListVersion),
                     controller: _customerController,
@@ -8404,7 +8886,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                     },
                   ),
                   const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
+                  SearchableStateField(
                     key: ValueKey(_placeOfSupplyController.text),
                     initialValue:
                         _indianStatesAndUnionTerritories.contains(
@@ -8526,51 +9008,54 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  TextField(
-                    controller: _termsController,
-                    minLines: 3,
-                    maxLines: 6,
-                    decoration: const InputDecoration(
-                      labelText: 'Terms and conditions',
-                      helperText:
-                          'Prefilled from Business Settings. Editable for this invoice.',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _isSavingDraft
-                              ? null
-                              : () => _saveDraft(openPreview: false),
-                          icon: const Icon(Icons.close_outlined),
-                          label: const Text('Save & Close'),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: FilledButton.icon(
-                          onPressed: _isSavingDraft
-                              ? null
-                              : () => _saveDraft(openPreview: true),
-                          icon: _isSavingDraft
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Icon(Icons.arrow_forward_outlined),
-                          label: Text(
-                            _isSavingDraft ? 'Saving...' : 'Save & Next',
+                  DesignSettings.modern.value
+                      ? EditableTerms(controller: _termsController)
+                      : TextField(
+                          controller: _termsController,
+                          minLines: 3,
+                          maxLines: 6,
+                          decoration: const InputDecoration(
+                            labelText: 'Terms and conditions',
+                            helperText:
+                                'Prefilled from Business Settings. Editable for this invoice.',
+                            border: OutlineInputBorder(),
                           ),
                         ),
-                      ),
-                    ],
-                  ),
+                  const SizedBox(height: 24),
+                  if (!DesignSettings.modern.value)
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _isSavingDraft
+                                ? null
+                                : () => _saveDraft(openPreview: false),
+                            icon: const Icon(Icons.close_outlined),
+                            label: const Text('Save & Close'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: _isSavingDraft
+                                ? null
+                                : () => _saveDraft(openPreview: true),
+                            icon: _isSavingDraft
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.arrow_forward_outlined),
+                            label: Text(
+                              _isSavingDraft ? 'Saving...' : 'Save & Next',
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                 ],
               ),
             ),
@@ -8771,9 +9256,14 @@ class InvoicePreviewPage extends StatefulWidget {
     required this.items,
     required this.invoiceNumber,
     required this.balanceDue,
+    this.previewProfile,
+    this.customerAddress = '',
+    this.customerGstin = '',
   });
 
   final String customerName;
+  final String customerAddress;
+  final String customerGstin;
   final String customerPhone;
   final String customerEmail;
   final String placeOfSupply;
@@ -8783,12 +9273,17 @@ class InvoicePreviewPage extends StatefulWidget {
   final List<InvoiceLineItem> items;
   final String invoiceNumber;
   final double balanceDue;
+  final Map<String, String>? previewProfile;
 
   @override
   State<InvoicePreviewPage> createState() => _InvoicePreviewPageState();
 }
 
-class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
+class InvoicePdfRenderer {
+  InvoicePdfRenderer(this.widget);
+  final InvoicePreviewPage widget;
+  Map<String, String> get _profile =>
+      widget.previewProfile ?? BusinessSettings.profile.value;
   double get _subtotal =>
       widget.items.fold(0, (sum, item) => sum + item.taxableAmount);
   double get _taxTotal =>
@@ -8796,7 +9291,7 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
   double get _total => _subtotal + _taxTotal;
   bool get _isIntraState =>
       _normaliseState(widget.placeOfSupply) ==
-      _normaliseState(BusinessSettings.profile.value['businessState'] ?? '');
+      _normaliseState(_profile['businessState'] ?? '');
   double get _cgstTotal => _isIntraState ? _taxTotal / 2 : 0;
   double get _sgstTotal => _isIntraState ? _taxTotal / 2 : 0;
   double get _igstTotal => _isIntraState ? 0 : _taxTotal;
@@ -8805,66 +9300,31 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
   String _date(DateTime? value) => value == null
       ? '-'
       : '${value.day.toString().padLeft(2, '0')}/${value.month.toString().padLeft(2, '0')}/${value.year}';
-  String get _message =>
-      'Hello ${widget.customerName}, here is the invoice ($_invoiceNumber) from '
-      '${BusinessSettings.profile.value['name'] ?? ''}. Please make the payment of '
-      'rupees ${widget.balanceDue.toStringAsFixed(2)} to the payment details as mentioned '
-      'in the invoice. If you need any further assistance, please contact us '
-      '${BusinessSettings.profile.value['phone'] ?? ''} or '
-      '${BusinessSettings.profile.value['email'] ?? ''}. Thank you';
-
-  String get _emailMessage =>
-      'Hello ${widget.customerName}. Please find attached invoice, $_invoiceNumber '
-      'for your reference. Kindly make the payment to the bank details mentioned '
-      'in the invoice. If you have any queries, please feel free to contact us.';
-
-  Future<void> _sendAttachment(String target, String recipient) async {
-    try {
-      final bytes = await _generatePdf(PdfPageFormat.a4);
-      if (Platform.isAndroid) {
-        await const MethodChannel(
-          'simplek/document_share',
-        ).invokeMethod('share', {
-          'bytes': bytes,
-          'filename':
-              'invoice_${_invoiceNumber.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_')}.pdf',
-          'target': target,
-          'recipient': recipient,
-          'subject': 'Invoice $_invoiceNumber',
-          'body': target == 'email' ? _emailMessage : _message,
-        });
-      } else {
-        await Printing.sharePdf(
-          bytes: bytes,
-          filename: 'invoice.pdf',
-          subject: 'Invoice $_invoiceNumber',
-          body: target == 'email' ? _emailMessage : _message,
-        );
-      }
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Unable to attach invoice: $error')),
-        );
-      }
-    }
-  }
-
   Future<pw.MemoryImage?> _image(String? path) async {
     if (path == null || path.isEmpty || !await File(path).exists()) return null;
     return pw.MemoryImage(await File(path).readAsBytes());
   }
 
-  Future<Uint8List> _generatePdf(PdfPageFormat format) async {
-    final profile = BusinessSettings.profile.value;
+  Future<Uint8List> build(PdfPageFormat format) async {
+    final profile = _profile;
+    final palette = InvoicePalette.resolve(profile['invoiceTheme']);
     final logo = await _image(profile['logoPath']);
     final signature = await _image(profile['signaturePath']);
     final qr = await buildPaymentQr(profile);
     final pdf = pw.Document();
     pdf.addPage(
       pw.MultiPage(
-        pageFormat: format,
-        margin: const pw.EdgeInsets.all(28),
+        pageTheme: pw.PageTheme(
+          pageFormat: format,
+          margin: const pw.EdgeInsets.all(28),
+          theme: pw.ThemeData.withFont().copyWith(
+            defaultTextStyle: pw.TextStyle(color: palette.pdfInk, fontSize: 10),
+          ),
+          buildBackground: (_) => pw.FullPage(
+            ignoreMargins: true,
+            child: pw.Container(color: palette.pdfPaper),
+          ),
+        ),
         build: (_) => [
           pw.Row(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -8904,7 +9364,11 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
                 ),
               ),
               pw.Text(
-                'TAX INVOICE',
+                widget.previewProfile != null
+                    ? 'SAMPLE INVOICE'
+                    : (BusinessSettings.isGstRegistered.value
+                          ? 'TAX INVOICE'
+                          : 'INVOICE'),
                 style: pw.TextStyle(
                   fontSize: 18,
                   fontWeight: pw.FontWeight.bold,
@@ -8915,12 +9379,12 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
           pw.SizedBox(height: 20),
           pw.Container(
             padding: const pw.EdgeInsets.all(10),
-            color: PdfColors.grey100,
+            color: palette.pdfPaper,
             child: pw.Row(
               children: [
                 pw.Expanded(
                   child: pw.Text(
-                    'Bill to\n${widget.customerName}',
+                    'Bill to\n${customerBillingDetails(name: widget.customerName, address: widget.customerAddress, gstin: widget.customerGstin, phone: widget.customerPhone)}',
                     style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
                   ),
                 ),
@@ -8936,9 +9400,9 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
           pw.TableHelper.fromTextArray(
             headerStyle: pw.TextStyle(
               fontWeight: pw.FontWeight.bold,
-              color: PdfColors.white,
+              color: palette.pdfPaper,
             ),
-            headerDecoration: const pw.BoxDecoration(color: PdfColors.indigo),
+            headerDecoration: pw.BoxDecoration(color: palette.pdfInk),
             cellAlignment: pw.Alignment.centerLeft,
             headers: const ['#', 'Description', 'Qty', 'Rate', 'GST', 'Amount'],
             data: List.generate(widget.items.length, (index) {
@@ -8972,6 +9436,8 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
               ),
             ),
           ),
+          pw.SizedBox(height: 10),
+          pw.Text('Amount in words: ${amountInWords(_total)}'),
           if ((profile['bankName'] ?? '').isNotEmpty ||
               (profile['bankAccount'] ?? '').isNotEmpty ||
               (profile['ifsc'] ?? '').isNotEmpty ||
@@ -9049,28 +9515,157 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
           ],
         ),
       );
+}
+
+class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
+  bool _sharing = false;
+  String get _invoiceNumber => widget.invoiceNumber;
+  String get _message =>
+      'Hello ${widget.customerName}, here is the invoice ($_invoiceNumber) from '
+      '${BusinessSettings.profile.value['name'] ?? ''}. Please make the payment of '
+      'rupees ${widget.balanceDue.toStringAsFixed(2)} to the payment details as mentioned '
+      'in the invoice. If you need any further assistance, please contact us '
+      '${BusinessSettings.profile.value['phone'] ?? ''} or '
+      '${BusinessSettings.profile.value['email'] ?? ''}. Thank you';
+
+  String get _emailMessage =>
+      'Hello ${widget.customerName}. Please find attached invoice, $_invoiceNumber '
+      'for your reference. Kindly make the payment to the bank details mentioned '
+      'in the invoice. If you have any queries, please feel free to contact us.';
+
+  Future<void> _sendAttachment(String target, String recipient) async {
+    if (_sharing) return;
+    setState(() => _sharing = true);
+    try {
+      final bytes = await _generatePdf(PdfPageFormat.a4);
+      await sharePdfAttachment(
+        bytes: bytes,
+        number: _invoiceNumber,
+        subject: 'Invoice $_invoiceNumber',
+        target: target,
+        recipient: recipient,
+        body: target == 'email' ? _emailMessage : _message,
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to attach invoice: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sharing = false);
+    }
+  }
+
+  Future<Uint8List> _generatePdf(PdfPageFormat format) =>
+      InvoicePdfRenderer(widget).build(format);
 
   Future<void> _sharePdf() async {
-    final bytes = await _generatePdf(PdfPageFormat.a4);
-    await Printing.sharePdf(
-      bytes: bytes,
-      filename: 'invoice_$_invoiceNumber.pdf',
-      subject: 'Invoice $_invoiceNumber',
-      body: _message,
-    );
+    await _sendAttachment('share', '');
   }
 
   Future<void> _openWhatsApp() async {
-    final phone = widget.customerPhone.replaceAll(RegExp(r'[^0-9]'), '');
-    if (phone.isEmpty) {
+    final phone = whatsappNumber(widget.customerPhone);
+    if (phone == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Add the customer WhatsApp number first.'),
+          content: Text(
+            'Enter a valid customer WhatsApp number, including country code for international numbers.',
+          ),
         ),
       );
       return;
     }
-    await _sendAttachment('whatsapp', phone.length == 10 ? '91$phone' : phone);
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'WhatsApp: ${widget.customerName}',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                Text('+$phone'),
+                const SizedBox(height: 12),
+                const Text(
+                  'Try opening the client with the PDF attached. Some WhatsApp versions instead ask you to select the client. The message is also copied so you can paste it if WhatsApp omits the caption. You still choose when to send.',
+                ),
+                const SizedBox(height: 12),
+                SelectableText(_message),
+                ListTile(
+                  leading: const Icon(Icons.chat_outlined),
+                  title: const Text('Open client chat with message'),
+                  onTap: () => Navigator.pop(context, 'chat'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.picture_as_pdf_outlined),
+                  title: const Text('Open client with PDF'),
+                  onTap: () => Navigator.pop(context, 'pdf'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.people_outline),
+                  title: const Text('Choose WhatsApp contact for PDF'),
+                  onTap: () => Navigator.pop(context, 'picker'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.copy_outlined),
+                  title: const Text('Copy message'),
+                  onTap: () => Navigator.pop(context, 'copy'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    try {
+      if (action == 'pdf' || action == 'picker') {
+        await Clipboard.setData(ClipboardData(text: _message));
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Message copied. Select the client in WhatsApp and paste it if the caption is empty.',
+            ),
+          ),
+        );
+        await _sendAttachment(
+          action == 'pdf' ? 'whatsapp' : 'whatsapp_picker',
+          phone,
+        );
+      } else if (action == 'copy') {
+        await Clipboard.setData(ClipboardData(text: _message));
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Message copied')));
+        }
+      } else {
+        final uri = whatsappChatUri(phone, _message);
+        if (Platform.isAndroid) {
+          await const MethodChannel(
+            'simplek/document_share',
+          ).invokeMethod('openChat', {'url': uri.toString()});
+        } else if (!await launchUrl(
+          uri,
+          mode: LaunchMode.externalApplication,
+        )) {
+          throw StateError('WhatsApp could not be opened.');
+        }
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to open WhatsApp: $error')),
+        );
+      }
+    }
   }
 
   Future<void> _openEmail() async {
@@ -9086,51 +9681,38 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: const Text('Invoice Preview'),
+      title: Text(
+        widget.previewProfile != null
+            ? 'Sample invoice format'
+            : 'Invoice Preview',
+      ),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('Close'),
+          child: Text(widget.previewProfile != null ? 'Close' : 'Save & Close'),
         ),
       ],
     ),
-    body: _SavedDocumentPreview(
-      buildPdf: _generatePdf,
-      addNewLabel: 'Save & Add New Invoice',
-      onAddNew: () => Navigator.of(context).pop(true),
-    ),
-    bottomNavigationBar: SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _openWhatsApp,
-                icon: const Icon(Icons.chat_outlined),
-                label: const Text('WhatsApp'),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _openEmail,
-                icon: const Icon(Icons.email_outlined),
-                label: const Text('Email'),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: FilledButton.icon(
-                onPressed: _sharePdf,
-                icon: const Icon(Icons.share_outlined),
-                label: const Text('Share PDF'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    ),
+    body: widget.previewProfile != null
+        ? PdfPreview(
+            build: _generatePdf,
+            canChangePageFormat: false,
+            canChangeOrientation: false,
+            allowPrinting: false,
+            allowSharing: false,
+          )
+        : _SavedDocumentPreview(
+            buildPdf: _generatePdf,
+            addNewLabel: 'Save & Add New Invoice',
+            onAddNew: () => Navigator.of(context).pop(true),
+          ),
+    bottomNavigationBar: widget.previewProfile != null
+        ? null
+        : DocumentShareBar(
+            onWhatsApp: _sharing ? null : _openWhatsApp,
+            onEmail: _sharing ? null : _openEmail,
+            onShare: _sharing ? null : _sharePdf,
+          ),
   );
 }
 
@@ -9170,6 +9752,15 @@ class _ProductsPageState extends State<ProductsPage> {
     });
     try {
       await OfflineStore.flush('products', 'products');
+      if (mounted) {
+        unawaited(
+          _showSyncRejections(
+            context,
+            'products',
+            (item) => 'Product or service "${item['name'] ?? ''}"',
+          ),
+        );
+      }
       final rows = await Supabase.instance.client
           .from('products')
           .select(
@@ -9357,6 +9948,16 @@ class _ProductsPageState extends State<ProductsPage> {
                     tooltip: 'Edit item',
                     onPressed: () => _editProduct(product),
                     icon: const Icon(Icons.edit_outlined),
+                  ),
+                  IconButton(
+                    tooltip: 'Delete item',
+                    icon: const Icon(Icons.delete_outline),
+                    onPressed: () => _removeCatalogEntry(
+                      context,
+                      'products',
+                      product,
+                      _loadProducts,
+                    ),
                   ),
                 ],
               ),
@@ -9575,6 +10176,7 @@ class _AddProductPageState extends State<AddProductPage> {
             ? <String, dynamic>{...?widget.product, ...product}
             : true,
       );
+      invoiceChanges.value++;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -9609,6 +10211,11 @@ class _AddProductPageState extends State<AddProductPage> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                if (DesignSettings.modern.value)
+                  const EditorSection(
+                    'Item details',
+                    'Set up an item once and reuse it in your documents.',
+                  ),
                 DropdownButtonFormField<String>(
                   initialValue: _itemType,
                   decoration: const InputDecoration(
@@ -9925,7 +10532,7 @@ class _HsnSacSelection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      color: Colors.green.shade50,
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -10039,6 +10646,7 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
           context,
         ).pop(<String, dynamic>{...?widget.customer, ...customer});
       }
+      invoiceChanges.value++;
     } catch (e) {
       if (!mounted) return;
       setState(() => _isSaving = false);
@@ -10107,6 +10715,9 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      constraints: DesignSettings.modern.value
+          ? const BoxConstraints(maxWidth: 600)
+          : null,
       title: Text(_isEditing ? 'Edit Customer' : 'New Customer'),
       content: SingleChildScrollView(
         child: Form(
@@ -10236,7 +10847,7 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
+                SearchableStateField(
                   key: ValueKey(_state),
                   initialValue: _state,
                   isExpanded: true,
