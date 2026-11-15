@@ -10,7 +10,7 @@
 
 ## Database
 
-Applied `supabase/migrations/20260924_business_document_numbers.sql` to the connected project. The migration preserves all existing business data, adds customer archival state, replaces global number uniqueness with owner/year uniqueness, and replaces all existing numbering RPC signatures.
+Applied `supabase/migrations/20260924000000_business_document_numbers.sql` to the connected project. The migration preserves all existing business data, adds customer archival state, replaces global number uniqueness with owner/year uniqueness, and replaces all existing numbering RPC signatures.
 
 `supabase/tests/20260924_document_regressions.sql` passed on the connected database. It verifies owner/year isolation, quotation independence, duplicate rejection, unchanged invoice records after catalogue archival, and required authentication. All fixtures and counter changes are rolled back.
 

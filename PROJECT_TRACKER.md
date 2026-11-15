@@ -28,7 +28,7 @@ implementation. Update the status and notes whenever a feature changes.
 | --- | --- | --- |
 | Email-link signup and password login | Blocked | App-side login, registration, email verification, password setup, remembered email, Android password-manager hints, deep-link manifest, and logout are complete. Dashboard URL Configuration is inaccessible with the current project role; add `simplek://login-callback/` there before final email-link testing. |
 | Redirect new users to business setup | Done | After email verification and password creation, new users complete a required three-step business onboarding flow before returning to login. |
-| Business profile | Done | Profile data syncs per user. Logo, signature, and payment QR use a private per-user Storage bucket and restore into persistent app storage on another device. Apply migrations through `20260901_business_media_storage.sql`. |
+| Business profile | Done | Profile data syncs per user. Logo, signature, and payment QR use a private per-user Storage bucket and restore into persistent app storage on another device. Apply migrations through `20260901000000_business_media_storage.sql`. |
 | GST registration options | Done | Onboarding captures GST status, registration type, PAN, business state and default place of supply. Registered businesses verify GSTIN to fill registered details. |
 | Terms and conditions | Done | Standard quotation and invoice terms are prefilled separately during onboarding, remain editable in Business Settings, and can be overridden on each document. |
 | Default invoice due date | Done | Business Settings stores invoice payment terms in days (7 by default); new invoices calculate the due date from the invoice date and remain editable. |
@@ -46,7 +46,7 @@ implementation. Update the status and notes whenever a feature changes.
 
 | Requirement | Status | Notes |
 | --- | --- | --- |
-| Add customer | Done | Name validation, optional contact details, GSTIN, tenant-owned Supabase save, and success feedback are implemented. `20260831_customer_product_rls.sql` was applied and verified on 2026-08-31. |
+| Add customer | Done | Name validation, optional contact details, GSTIN, tenant-owned Supabase save, and success feedback are implemented. `20260831000000_customer_product_rls.sql` was applied and verified on 2026-08-31. |
 | Customer list | Done | Supabase-backed list, loading/error states, pull-to-refresh, and drawer navigation are implemented. |
 | Search and autocomplete | Done | Customer list and reusable document pickers search by name, mobile, email, or GSTIN. |
 | Customer history | Done | Tapping a customer shows their contact details, billing total, outstanding balance, invoices, and quotations. |
@@ -137,15 +137,14 @@ implementation. Update the status and notes whenever a feature changes.
 All locally actionable product requirements are implemented. Remaining work is
 limited to the external blockers above and the low-risk architectural file split.
 
-Security and media migrations through `20260901_quotation_rls.sql`,
-`20260901_business_media_storage.sql`, and `20260904_invoice_rls.sql` were
+Security and media migrations through `20260901000001_quotation_rls.sql`,
+`20260901000000_business_media_storage.sql`, and `20260904000001_invoice_rls.sql` were
 applied to the live project by 2026-09-04.
 
 ## November 6 payment and invoice-save fixes
 
-- **Deploy order:** apply `20261106_atomic_invoice_payment_saves.sql` before
-  shipping this app version. The new app cannot save invoices without it; older
-  app versions keep working after it is applied.
+- **Deployed:** `20261106000000_atomic_invoice_payment_saves.sql` was applied to
+  the live project on 2026-11-15 (see below). The app on `master` needs it.
 - `record_invoice_payment` now checks invoice ownership, is closed to `anon`,
   and ignores a repeated `client_request_id`.
 - `save_invoice` and `convert_quotation_to_invoice` run as one transaction, so a
@@ -155,5 +154,25 @@ applied to the live project by 2026-09-04.
   each item once, and set aside items the server refuses, telling the user.
   Offline payments keep the date they were recorded.
 - `supabase/tests/20261106_atomic_saves_regressions.sql` passed on a local
-  Postgres built from the migrations. It has not been run on the live project,
-  and these flows have not been tried on a device.
+  Postgres and, on 2026-11-15, on the live project. These flows have not been
+  tried on a device.
+
+## November 15 live database takeover
+
+- The repo is linked to the live project with the Supabase CLI
+  (`supabase/config.toml`). A full backup taken before any change is in the
+  git-ignored `backups/` folder (schema, data and roles; uploaded images are
+  not included).
+- **Security fix:** three policies that existed only in the live project ("Allow
+  all customers", "Allow all products", "Allow all payments") gave anonymous
+  callers full read and write access to every business's rows. Removed by
+  `20261115000000_remove_anon_full_access.sql`. Whether they were ever misused
+  cannot be determined from the database.
+- Migrations were renamed to unique 14-digit versions, and the 18 already
+  present on live were recorded as applied with `supabase migration repair`.
+  `supabase migration list --remote` now matches the repo, so new migrations go
+  out with `supabase db push --remote` (dry-run first with `--dry-run`).
+- Both regression scripts passed on live; row counts were unchanged.
+- Still open: the repo's migrations cannot build the database from scratch (no
+  migration creates `customers`, `products` or `invoice_items`). One invoice has
+  no owner and is invisible to every user.

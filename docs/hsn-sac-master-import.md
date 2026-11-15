@@ -24,7 +24,7 @@ official source does not supply them; they must not be guessed.
 
 ## Import/update procedure
 
-1. Apply `supabase/migrations/20260810_hsn_sac_master.sql` in the Supabase SQL
+1. Apply `supabase/migrations/20260810000000_hsn_sac_master.sql` in the Supabase SQL
    Editor or through the Supabase CLI.
 2. Load the official CSV into a staging table using the Supabase Dashboard's
    CSV import feature or a service-role administration job.

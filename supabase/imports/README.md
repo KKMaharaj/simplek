@@ -9,7 +9,7 @@ Generated from `C:\Users\HP\Downloads\HSN_SAC.xlsx`.
 
 ## Import order
 
-1. Apply `../migrations/20260828_allow_complete_hsn_sac_master.sql` in the
+1. Apply `../migrations/20260828000000_allow_complete_hsn_sac_master.sql` in the
    Supabase SQL Editor. The official HSN sheet includes 5- and 7-digit
    intermediate classifications in addition to the required 2/4/6/8 levels.
 2. In the Supabase Table Editor, select `hsn_sac_master` and import

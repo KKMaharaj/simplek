@@ -217,7 +217,7 @@ The current palette preference is in authenticated user metadata plus a user-sco
 - Include amounts in words using Indian rupees/lakh/crore/paise, consistent with printed totals.
 - Show seller details, document number/date, due date, recipient, place of supply, line items, tax breakdown, totals, bank/UPI details, terms, and signature as applicable. Assess additional required fields for the actual business; a generated PDF is not proof of statutory compliance.
 - Persist invoice and items before presenting a saved preview. **Existing:** `save_invoice(p_invoice_id, p_header, p_items, p_is_edit, p_number_prefix)` writes the header, replaces the items and allocates the number in one transaction. Any failure leaves the previous invoice, its items and the number counter unchanged. The client generates the invoice id before the first attempt, so a retry after a lost response returns the saved invoice instead of creating another. The server decides status, balance and paid amount; the client cannot set them. `sent` means finalized/unpaid, not proof that an email or WhatsApp message was sent.
-- The function runs with the caller's permissions, so row-level security still applies. Its accepted header and item fields are listed in `supabase/migrations/20261106_atomic_invoice_payment_saves.sql`; the website must send the same shape or wrap the function in its own API.
+- The function runs with the caller's permissions, so row-level security still applies. Its accepted header and item fields are listed in `supabase/migrations/20261106000000_atomic_invoice_payment_saves.sql`; the website must send the same shape or wrap the function in its own API.
 - **Existing gap:** editing an invoice to a total below the amount already paid marks it paid with a zero balance, and the overpayment is not shown anywhere. Decide whether the website should block that edit or record a credit.
 - Update dashboard/list data after saves, edits, archival, and sync. Ignore out-of-order refresh responses.
 - Use archive/soft-delete for customers/products so old invoices and quotations remain intact.
@@ -307,11 +307,11 @@ Paths are relative to the Simplek repository. The new AI may not have these file
 - `lib/document_defaults.dart`: separate editable invoice/quotation defaults.
 - `lib/document_text.dart`: Indian amount-in-words and number-input validation.
 - `lib/document_sharing.dart`, `lib/whatsapp_contact.dart`, Android `MainActivity.kt`: mobile sharing and phone normalization; redesign the platform layer for web.
-- `supabase/migrations/20260830_business_profiles.sql`, `20260830_business_tax_and_numbering.sql`: profile schema and tax-related fields.
-- `supabase/migrations/20260901_business_media_storage.sql`: private storage layout and policies.
-- `supabase/migrations/20260924_business_document_numbers.sql`: per-owner/year counters, uniqueness, compatible RPCs, customer archival field.
+- `supabase/migrations/20260830000000_business_profiles.sql`, `20260830000001_business_tax_and_numbering.sql`: profile schema and tax-related fields.
+- `supabase/migrations/20260901000000_business_media_storage.sql`: private storage layout and policies.
+- `supabase/migrations/20260924000000_business_document_numbers.sql`: per-owner/year counters, uniqueness, compatible RPCs, customer archival field.
 - `supabase/tests/20260924_document_regressions.sql`: rollback-only numbering/isolation/archive regression checks.
-- `supabase/migrations/20261106_atomic_invoice_payment_saves.sql`: `save_invoice`, `convert_quotation_to_invoice` and the ownership-checked `record_invoice_payment`.
+- `supabase/migrations/20261106000000_atomic_invoice_payment_saves.sql`: `save_invoice`, `convert_quotation_to_invoice` and the ownership-checked `record_invoice_payment`.
 - `supabase/tests/20261106_atomic_saves_regressions.sql`: rollback-only checks for payment ownership, retries, failed-save rollback and conversion.
 - `lib/offline_queue.dart`: the mobile app's offline queue. Mobile-only; a website should not copy it unless it needs offline support.
 - `docs/hsn-sac-master-import.md`: master-data import process; source tax classifications from a maintained authoritative dataset rather than AI-generated lists.
@@ -336,10 +336,11 @@ These were found by reading the source. Fix them in the website rather than copy
 | PDF text | Built-in Helvetica font: amounts print as `Rs.` instead of `₹`, and non-Latin names (for example Hindi or Malayalam) probably do not render; not tested | Embed a Unicode font and test Indian scripts |
 | GSTIN status | Unknown status shown as `active` (section 5) | Show the returned status, or "unknown" |
 | Payments | No history, edit, reversal, reference or notes (section 9) | Add if needed |
-| Database schema | The repository's migrations cannot build the database: no migration creates `customers`, `products` or `invoice_items`; `invoices.created_at`, which the dashboard sorts by, is in none of them; several files share a date-only version; and `20260829_payment_schema_compatibility.sql` sorts before the migration that creates `payments` | Take a schema dump of the live project as the starting point and keep complete, uniquely versioned migrations |
+| Database schema | The repository's migrations cannot build the database: no migration creates `customers`, `products` or `invoice_items`; `invoices.created_at`, which the dashboard sorts by, is in none of them. (Duplicate versions and the payments ordering were fixed on 15 November 2026, and the live migration history now matches the repo.) | Take a schema dump of the live project as the starting point and keep complete, uniquely versioned migrations |
 
 ## 16. Changes since the 4 October 2026 version
 
 - Commit `bbec152` (6 November 2026) added `save_invoice` and `convert_quotation_to_invoice`, and closed a hole in `record_invoice_payment`, which had let any caller, including anonymous ones, record payments on any invoice whose id they knew. Sections 2, 9 and 10 now describe these as existing behavior.
-- Its migration was tested only on a local Postgres built from the repository's migrations. Confirm it has been applied to the live project before relying on it. The new mobile app cannot save invoices without it.
+- Its migration was applied to the live project on 15 November 2026, and its regression test passed there.
+- Also on 15 November 2026: removed three live-only policies that gave anonymous callers full access to customers, products and payments (`20261115000000_remove_anon_full_access.sql`). Do not grant the `anon` role access to business data in the website.
 - Added: the GSTIN `active` default defect (section 5), the existing rounding behavior (section 9), the 16-character invoice number check (section 10), known limitations (section 15) and acceptance tests 17–19.
