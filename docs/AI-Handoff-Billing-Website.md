@@ -1,6 +1,6 @@
 # AI handoff: business profile and billing website
 
-Prepared for a new billing-only e-commerce website, based on the Simplek application. Reviewed against the local source on 4 October 2026.
+Prepared for a new billing-only e-commerce website, based on the Simplek application. Last reviewed against the Simplek source on 15 November 2026 (commit `bbec152`). Section 16 lists what changed since the 4 October 2026 version.
 
 ## 1. Copy this brief to the next AI
 
@@ -8,7 +8,7 @@ Build a responsive, authenticated billing module for my e-commerce website, usin
 
 Prioritize business onboarding, editable business settings, bank and tax lookups, payment QR generation, customer/product selection, invoice creation, preview, download, and sharing. Keep quotations optional. Protect each business's data and preserve historical invoices when profiles, customers, or products change.
 
-Use this document as a specification, not as proof that every feature already exists. Features are labeled **Existing**, **New addition**, or **Production improvement**. Do not invent API capabilities, expose API secrets, or present generated QR codes as confirmed payments. Deliver working integrations, migrations, tests, setup instructions, and clear statements about anything requiring a provider account or credentials.
+Use this document as a specification, not as proof that every feature already exists. Read section 15 before reusing any behavior: it lists current Simplek defects that must not be reproduced. Features are labeled **Existing**, **New addition**, or **Production improvement**. Do not invent API capabilities, expose API secrets, or present generated QR codes as confirmed payments. Deliver working integrations, migrations, tests, setup instructions, and clear statements about anything requiring a provider account or credentials.
 
 Terminology: the user's reference to “UKD” is interpreted here as **UPI ID**, the payment address used to generate the QR code.
 
@@ -28,6 +28,9 @@ Terminology: the user's reference to “UKD” is interpreted here as **UPI ID**
 | Numbering | Owner-, document-type-, and financial-year-specific allocation | Adapt ownership to the website's business model |
 | Delete customer/product | Archive active catalogue entry; retain historical records | Preserve this behavior |
 | Sharing | Android attachment sharing plus WhatsApp chat/message options | Implement a browser-specific equivalent |
+| Invoice save | One database transaction (`save_invoice`), retry-safe through a client-chosen invoice id | Reuse the function or reproduce its guarantees |
+| Quotation conversion | One database transaction (`convert_quotation_to_invoice`); a repeat returns the same invoice | Reuse if quotations are in scope |
+| Payments | Manual payments through `record_invoice_payment`, which checks ownership and ignores a repeated request id | Reuse; there is no payment history or reversal yet |
 
 “Existing” means found in source, not that a provider's live account, credits, or every device behavior was revalidated for this document.
 
@@ -113,6 +116,7 @@ Provider reference: [Razorpay IFSC API repository](https://github.com/razorpay/i
 - Require a successful response with a `data` object.
 - Prefer `trade_name` for the displayed business/customer name; fall back to `legal_name`.
 - Fill the returned `address` when present; display returned registration status.
+- **Known defect, do not copy:** the onboarding success message shows `active` when the provider returns no status (`lib/main.dart`, `_verifyGstin` in onboarding).
 - Existing screens title-case returned names/addresses. For the website, preserve the original legal name as well; cosmetic normalization must not corrupt legal identity.
 
 **Existing server flow**
@@ -208,21 +212,37 @@ The current palette preference is in authenticated user metadata plus a user-sco
 - Product/service classification uses the HSN/SAC master. GST product forms search active master entries after at least three characters and require selection. UQC is selected from approved units. Do not invent codes or infer GST rate from HSN/SAC; current rates are entered separately.
 - Current calculation baseline: taxable value = quantity × rate; tax = taxable value × GST percentage / 100; total = taxable value + tax. The app splits tax into CGST/SGST when its state comparison indicates intra-state, otherwise IGST.
 - Treat that simple state comparison as existing application behavior, not complete tax advice. For the new e-commerce context, have the applicable place-of-supply, shipping, discount, rounding, and tax rules reviewed before production. Use decimal money arithmetic and a documented rounding policy.
+- **Existing rounding, do not copy:** Simplek calculates in floating point and lets the database round each stored field to two decimals separately. Components can then disagree with the total: 5% GST on ₹101 is ₹5.05, but CGST and SGST are each stored as ₹2.53. Round once, in paise, and derive one component as the remainder.
 - Display available customer name/address/GSTIN/phone on separate Bill To lines. Omit missing details.
 - Include amounts in words using Indian rupees/lakh/crore/paise, consistent with printed totals.
 - Show seller details, document number/date, due date, recipient, place of supply, line items, tax breakdown, totals, bank/UPI details, terms, and signature as applicable. Assess additional required fields for the actual business; a generated PDF is not proof of statutory compliance.
-- Persist invoice and items before presenting a saved preview. The current code temporarily writes `draft`, then finalizes after line-item save. Legacy `sent` means finalized/unpaid here, not proof that an email or WhatsApp message was sent.
-- Improve the website save operation to an atomic transaction/RPC with idempotency. A failed retry must not duplicate an invoice or leave a finalized header without its items.
+- Persist invoice and items before presenting a saved preview. **Existing:** `save_invoice(p_invoice_id, p_header, p_items, p_is_edit, p_number_prefix)` writes the header, replaces the items and allocates the number in one transaction. Any failure leaves the previous invoice, its items and the number counter unchanged. The client generates the invoice id before the first attempt, so a retry after a lost response returns the saved invoice instead of creating another. The server decides status, balance and paid amount; the client cannot set them. `sent` means finalized/unpaid, not proof that an email or WhatsApp message was sent.
+- The function runs with the caller's permissions, so row-level security still applies. Its accepted header and item fields are listed in `supabase/migrations/20261106_atomic_invoice_payment_saves.sql`; the website must send the same shape or wrap the function in its own API.
+- **Existing gap:** editing an invoice to a total below the amount already paid marks it paid with a zero balance, and the overpayment is not shown anywhere. Decide whether the website should block that edit or record a credit.
 - Update dashboard/list data after saves, edits, archival, and sync. Ignore out-of-order refresh responses.
 - Use archive/soft-delete for customers/products so old invoices and quotations remain intact.
 
-**Historical snapshots — production improvement:** store seller, buyer, item descriptions, tax settings, payment details, terms, and template version on the issued invoice. Current source does not fully snapshot everything: some previews read the current business profile and customer records. Do not reproduce that limitation as a historical-data guarantee.
+### Recording payments
+
+**Existing:** `record_invoice_payment(p_invoice_id, p_amount, p_payment_method, p_payment_date, p_reference_number, p_notes, p_client_request_id)` locks the invoice, rejects amounts above the outstanding balance and sets the status to `partial` or `paid`. Methods are `cash`, `upi`, `bank_transfer`, `card` and `cheque`.
+
+- It bypasses row-level security, so it checks ownership itself: another business's invoice is reported as "Invoice not found". It is closed to anonymous callers.
+- Send a new `p_client_request_id` for each payment the user submits and reuse it on retries. A repeated id returns the original payment, even if that payment settled the invoice.
+- **Gaps:** clients cannot read the `payments` table (it has no read policies), so there is no payment history, edit or reversal. The mobile app does not capture reference or notes. Add these explicitly if the website needs them, keeping any new function's ownership check.
+
+### Historical snapshots
+
+**Production improvement:** store seller, buyer, item descriptions, tax settings, payment details, terms, and template version on the issued invoice. Current source does not fully snapshot everything: some previews read the current business profile and customer records. Do not reproduce that limitation as a historical-data guarantee.
 
 ## 10. Numbering, tenancy, and data model
 
 Current numbering is separate by authenticated user, document type, and April–March financial year. New owners/years start at `01`; existing owners continue after their highest relevant number. Examples are `INV/2026-27/01` and `QTN/2026-27/01`. Existing documents are not renumbered.
 
-Allocation runs on the database, not by counting frontend rows. A counter row is updated atomically. Unique indexes enforce owner + financial year + normalized document number. Optional manual numbers receive the same protection; duplicate attempts show red errors and do not save. Case and surrounding whitespace must not bypass uniqueness. Do not reset counters on sign-out/sign-in.
+Allocation runs on the database, not by counting frontend rows. A counter row is updated atomically. **Existing:** invoice saves and quotation conversion allocate the number inside the same transaction, so a failed save does not use up a number.
+
+Prefixes accept 1–20 letters, digits or hyphens. Indian GST rules limit an invoice serial number to 16 characters, so a long prefix or a five-digit sequence (`INV/2026-27/10000` is 17) can exceed it. Have the limit confirmed and enforce it on the server.
+
+Unique indexes enforce owner + financial year + normalized document number. Optional manual numbers receive the same protection; duplicate attempts show red errors and do not save. Case and surrounding whitespace must not bypass uniqueness. Do not reset counters on sign-out/sign-in.
 
 The current model effectively uses one business per user. For shared staff access or multiple e-commerce stores, introduce `business_id` and a membership/role table. Scope counters, documents, customers, products, settings, and media to that business. Staff sharing one business must share one sequence; unrelated businesses must not.
 
@@ -237,7 +257,7 @@ The current model effectively uses one business per user. For shared staff acces
 | Invoice + invoice items | Number/date/status/totals and immutable issued-document snapshots |
 | Quotation + items (optional) | Separate document sequence, validity, terms, conversion state |
 | Document counter | Business, document type, financial year, last allocated number |
-| Payment record | Invoice reference, amount, date/method, reconciliation/idempotency reference |
+| Payment record | Invoice reference, amount, date/method, reconciliation reference; `client_request_id` (existing) prevents double recording |
 | Media | Private business-scoped assets and historical versions |
 | Lookup metadata (recommended) | Provider, normalized input, verification status/time; avoid storing unnecessary raw personal data |
 
@@ -271,6 +291,9 @@ Never ship GST provider secrets or Supabase service-role keys to the frontend. E
 14. PDF download and available share paths work with slash-containing numbers; unavailable sharing features fall back clearly.
 15. Forms, tax selectors, QR previews, and buttons remain readable at small widths, in dark mode, and with enlarged text.
 16. Cross-business reads/writes and unauthorized media downloads fail in server/database tests, not merely UI tests.
+17. Another business cannot record a payment on an invoice, and a retried payment with the same request id is recorded once.
+18. Dashboard totals, reports and GSTR-1 include every invoice in the selected period, however many there are.
+19. A quotation for a GST-registered customer converts to a B2B invoice that keeps the customer's GSTIN.
 
 ## 13. Existing source map for reuse
 
@@ -288,6 +311,9 @@ Paths are relative to the Simplek repository. The new AI may not have these file
 - `supabase/migrations/20260901_business_media_storage.sql`: private storage layout and policies.
 - `supabase/migrations/20260924_business_document_numbers.sql`: per-owner/year counters, uniqueness, compatible RPCs, customer archival field.
 - `supabase/tests/20260924_document_regressions.sql`: rollback-only numbering/isolation/archive regression checks.
+- `supabase/migrations/20261106_atomic_invoice_payment_saves.sql`: `save_invoice`, `convert_quotation_to_invoice` and the ownership-checked `record_invoice_payment`.
+- `supabase/tests/20261106_atomic_saves_regressions.sql`: rollback-only checks for payment ownership, retries, failed-save rollback and conversion.
+- `lib/offline_queue.dart`: the mobile app's offline queue. Mobile-only; a website should not copy it unless it needs offline support.
 - `docs/hsn-sac-master-import.md`: master-data import process; source tax classifications from a maintained authoritative dataset rather than AI-generated lists.
 
 ## 14. Deliverables requested from the implementing AI
@@ -295,3 +321,25 @@ Paths are relative to the Simplek repository. The new AI may not have these file
 Produce the billing-only web interface, reusable profile/lookup components, server adapters, database migrations and policies, a shared calculation/document model, invoice preview/download, and automated acceptance tests. Include setup instructions and an environment-variable template containing names/placeholders only. Document remaining provider approvals, credentials, deployment steps, and device/browser tests honestly.
 
 Do not add unrelated commerce features. Do not mark API integrations, payment verification, legal compliance, or direct WhatsApp attachment delivery as complete based only on mockups or successful UI rendering.
+
+## 15. Known limitations in Simplek: do not reproduce
+
+These were found by reading the source. Fix them in the website rather than copying the behavior.
+
+| Area | Current behavior | Website requirement |
+|---|---|---|
+| Dashboard totals | Total sales and outstanding add up only the newest 100 non-draft invoices | Aggregate on the server across all invoices |
+| Reports and GSTR-1 | Load the newest 500 invoices and 5,000 unfiltered line items, then filter by period in the app; older periods can be silently incomplete | Filter and aggregate by period on the server; never truncate filing data without saying so |
+| Quotation conversion | Quotations have no GSTIN field, so a converted invoice has none and is reported as B2C until edited | Store the buyer GSTIN on quotations and carry it over |
+| Money arithmetic | Floating point, rounded per stored field (see section 9) | Integer paise with one documented rounding rule |
+| Sign-out | Bank, UPI and PAN values stay in device storage under keys not tied to a user, and a new user without a saved profile can see them | Scope cached profile data to the business and clear it on sign-out |
+| PDF text | Built-in Helvetica font: amounts print as `Rs.` instead of `₹`, and non-Latin names (for example Hindi or Malayalam) probably do not render; not tested | Embed a Unicode font and test Indian scripts |
+| GSTIN status | Unknown status shown as `active` (section 5) | Show the returned status, or "unknown" |
+| Payments | No history, edit, reversal, reference or notes (section 9) | Add if needed |
+| Database schema | The repository's migrations cannot build the database: no migration creates `customers`, `products` or `invoice_items`; `invoices.created_at`, which the dashboard sorts by, is in none of them; several files share a date-only version; and `20260829_payment_schema_compatibility.sql` sorts before the migration that creates `payments` | Take a schema dump of the live project as the starting point and keep complete, uniquely versioned migrations |
+
+## 16. Changes since the 4 October 2026 version
+
+- Commit `bbec152` (6 November 2026) added `save_invoice` and `convert_quotation_to_invoice`, and closed a hole in `record_invoice_payment`, which had let any caller, including anonymous ones, record payments on any invoice whose id they knew. Sections 2, 9 and 10 now describe these as existing behavior.
+- Its migration was tested only on a local Postgres built from the repository's migrations. Confirm it has been applied to the live project before relying on it. The new mobile app cannot save invoices without it.
+- Added: the GSTIN `active` default defect (section 5), the existing rounding behavior (section 9), the 16-character invoice number check (section 10), known limitations (section 15) and acceptance tests 17–19.
