@@ -1,8 +1,9 @@
-import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/services.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:qr_flutter/qr_flutter.dart';
+
+import 'platform/local_files.dart';
 
 Future<pw.Widget?> buildPaymentQr(Map<String, String> profile) async {
   final upi = (profile['upiId'] ?? '').trim();
@@ -26,10 +27,8 @@ Future<pw.Widget?> buildPaymentQr(Map<String, String> profile) async {
     ).toImageData(400, format: ui.ImageByteFormat.png);
     if (data != null) qr = pw.MemoryImage(data.buffer.asUint8List());
   } else {
-    final path = profile['qrPath'] ?? '';
-    if (path.isNotEmpty && await File(path).exists()) {
-      qr = pw.MemoryImage(await File(path).readAsBytes());
-    }
+    final bytes = await readLocalFile(profile['qrPath']);
+    if (bytes != null) qr = pw.MemoryImage(bytes);
   }
   if (qr == null) return null;
   final logo = pw.MemoryImage(

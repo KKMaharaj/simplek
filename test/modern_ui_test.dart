@@ -39,7 +39,7 @@ void main() {
       for (final font in {
         'Roboto': 'C:/Windows/Fonts/segoeui.ttf',
         'MaterialIcons':
-            'C:/Users/HP/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+            'C:/Users/HP/development/flutter/bin/cache/artifacts/material_fonts/materialicons-regular.otf',
       }.entries) {
         final loader = FontLoader(font.key);
         loader.addFont(
@@ -137,40 +137,45 @@ void main() {
     }
   }
 
-  testWidgets(
-    'Classic toggle changes theme and persists without clearing business values',
-    (tester) async {
-      SharedPreferences.setMockInitialValues({
-        'business_invoice_terms': 'Keep my terms',
-      });
-      await tester.pumpWidget(
-        const MyApp(
-          home: Scaffold(
-            body: Padding(padding: EdgeInsets.all(16), child: DesignSelector()),
+  testWidgets('theme switch changes the app theme in one tap and persists', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      'business_invoice_terms': 'Keep my terms',
+    });
+    await tester.pumpWidget(
+      MyApp(
+        home: Scaffold(
+          body: Padding(
+            padding: const EdgeInsets.all(16),
+            child: ValueListenableBuilder<ThemeMode>(
+              valueListenable: BusinessSettings.themeMode,
+              builder: (context, mode, _) => ThemeModeToggle(
+                mode: mode,
+                onChanged: BusinessSettings.setThemeMode,
+              ),
+            ),
           ),
         ),
-      );
-      await tester.tap(find.byType(DropdownButtonFormField<bool>));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Classic — previous design').last);
-      await tester.pumpAndSettle();
-      expect(DesignSettings.modern.value, false);
-      final preferences = await SharedPreferences.getInstance();
-      expect(preferences.getBool('modern_design'), false);
-      expect(preferences.getString('business_invoice_terms'), 'Keep my terms');
-      expect(
-        tester
-            .widget<MaterialApp>(find.byType(MaterialApp))
-            .theme!
-            .colorScheme
-            .primary,
-        isNot(simplekTheme(Brightness.light).colorScheme.primary),
-      );
-      await DesignSettings.setModern(true);
-      await tester.pumpAndSettle();
-      expect(preferences.getBool('modern_design'), true);
-    },
-  );
+      ),
+    );
+    expect(find.text('Light'), findsOneWidget);
+    expect(find.text('Dark'), findsOneWidget);
+    expect(find.text('Auto'), findsOneWidget);
+    await tester.tap(find.text('Dark'));
+    await tester.pumpAndSettle();
+    expect(BusinessSettings.themeMode.value, ThemeMode.dark);
+    expect(
+      Theme.of(tester.element(find.text('Dark'))).brightness,
+      Brightness.dark,
+    );
+    final preferences = await SharedPreferences.getInstance();
+    expect(preferences.getString('business_invoice_terms'), 'Keep my terms');
+    await tester.tap(find.text('Light'));
+    await tester.pumpAndSettle();
+    expect(BusinessSettings.themeMode.value, ThemeMode.light);
+    await BusinessSettings.setThemeMode(ThemeMode.system);
+  });
 
   testWidgets('save and share actions fit at 320px and 200% text', (
     tester,

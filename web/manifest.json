@@ -4,9 +4,9 @@
     "start_url": ".",
     "display": "standalone",
     "background_color": "#FFFFFF",
-    "theme_color": "#193A73",
+    "theme_color": "#3B5BFD",
     "description": "Invoicing made easy",
-    "orientation": "portrait-primary",
+    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {

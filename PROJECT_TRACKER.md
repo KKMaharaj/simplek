@@ -185,3 +185,70 @@ applied to the live project by 2026-09-04.
   The line on `INV/2026-27/0008` kept its name and amounts and lost only its
   product link. No ownerless rows remain; restoring them needs the 2026-11-15
   backup.
+
+## November 15 redesign, web app, website and biometric unlock
+
+- **New design** (`lib/app_theme.dart`, `lib/modern_ui.dart`): one visual
+  language for phone and web. The Classic/Modern switch was removed. New app
+  frame: bottom navigation on phones, sidebar at 900px and wider. New home,
+  More, login and "Create" sheet. The light/dark choice is a three-way switch
+  (Light / Dark / Auto) in More, Settings and the sidebar, plus a one-tap
+  toggle on the home screen. List, builder, report and settings screens take
+  the new theme but keep their old layouts; a few document screens still
+  contain unused Classic branches behind `DesignSettings.modern`.
+- **Signature**: new full-width signing pad (`lib/signature_pad.dart`) saves
+  only the ink on a transparent background. On documents, signatures are
+  trimmed to their ink (`lib/signature_image.dart`) and print in a 200×84pt
+  box instead of 110×45pt. Quotations now carry the signature too.
+- **Fingerprint / face unlock** (`lib/app_lock.dart`, `local_auth`): offered
+  once after login on devices with biometrics; toggle in More and Settings.
+  It unlocks the saved session; the password is still needed to sign in on a
+  new device or after logging out. `MainActivity` is now a
+  `FlutterFragmentActivity`. Not yet tried on a real phone.
+- **Web app**: the same Flutter code builds for the web. File access goes
+  through `lib/platform/local_files.dart` (real files on phones, memory on the
+  web, restored from cloud storage). `dart:io` is no longer imported by the
+  app. Saving the profile no longer clears a cloud image reference when the
+  local copy is missing or an upload fails.
+- **Website** (`website/index.html`): public page with Log in and Sign up
+  leading to the web app at `/app/` (`/app/?signup=1` opens sign-up).
+  `tool/build_site.sh` builds `build/site`; `dart run tool/serve.dart` previews
+  it at http://localhost:8080.
+- **Live sync** (`lib/live_sync.dart`, `20261115000003_realtime_sync.sql`,
+  applied on live): the same account on web and phone shares one database, and
+  open home/list screens refresh when another device changes invoices,
+  quotations, customers or products.
+- `pubspec.yaml` Dart constraint relaxed to `^3.12.0` to match the installed
+  SDK; `http` and `local_auth` added.
+- **Before the website can go live:** choose a host and upload `build/site`,
+  then add the site's `/app/` URL to Supabase Auth → URL Configuration →
+  Redirect URLs, or email sign-up links from the web will not return to it.
+
+## November 16 sync screen, online-only saving, accountant access, pricing page
+
+- **Sync & backup** (More → Sync & backup): shows anything an earlier version
+  left waiting on the device for the signed-in account and uploads it; warns
+  when another account on the device has items waiting. Leftovers also upload
+  automatically at start and login.
+- **Online-only saving:** invoices, payments, customers and products are no
+  longer queued on the device when offline. The app says nothing was saved; an
+  open invoice form can simply be saved again once online. A read-only cached
+  copy of the customer and product lists is still kept for search.
+- **Accountant access** (`20261116000000_accountant_access.sql`,
+  `20261116000001_accountant_media_access.sql`, applied on live;
+  `lib/business_access.dart`): an owner gives view-only access by email under
+  More → Accountant access. The accountant logs in with their own account,
+  opens the shared business there, and sees it with a "view only" banner.
+  Read policies follow `viewing_business()`; writes stay owner-only, and the
+  server refuses any new record while another business is being viewed. Only
+  a confirmed email matches an invite; removing the invite ends access at
+  once. `supabase/tests/20261116_accountant_access_regressions.sql` passed
+  locally and on live. Known gaps: no email is sent to the accountant; a new
+  accountant still goes through business onboarding; edit buttons inside
+  screens are not hidden in view mode (the server rejects the change); not
+  tried with two real accounts in the app.
+- **Website:** leads with sales-invoices-only, explains what Simplek leaves
+  out, lists accountant login and Tally/GSTR-1 export, and shows pricing (free
+  to 30 invoices a month; ₹250 a month or ₹1,500 a year). AI invoice creation
+  is marked "Coming soon". **The 30-invoice limit and payments are not
+  implemented**: today every account is unlimited and free.

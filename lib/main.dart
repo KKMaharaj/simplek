@@ -7,18 +7,23 @@ import 'whatsapp_contact.dart';
 import 'payment_pdf.dart';
 import 'modern_ui.dart';
 import 'offline_queue.dart';
+import 'live_sync.dart';
+import 'app_lock.dart';
+import 'business_access.dart';
+import 'platform/local_files.dart';
+import 'signature_image.dart';
+import 'signature_pad.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:excel_plus/excel_plus.dart' as xlsx;
 import 'package:image_picker/image_picker.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:path_provider/path_provider.dart';
 import 'package:printing/printing.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -150,7 +155,7 @@ String _normaliseState(String value) =>
     value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
 
 bool _isOfflineError(Object error) {
-  if (error is SocketException) return true;
+  if (isNetworkError(error)) return true;
   final message = error.toString().toLowerCase();
   return message.contains('socketexception') ||
       message.contains('failed host lookup') ||
@@ -594,6 +599,52 @@ class OfflineStore {
     await writeList(name, rows);
   }
 
+  static const _queueNames = [
+    'customers',
+    'products',
+    'invoice_drafts',
+    'payments',
+  ];
+
+  /// How many items per kind are waiting on this device for this account.
+  static Future<Map<String, int>> pendingCounts() async => {
+    for (final name in _queueNames)
+      name: (await readList('${name}_queue')).length,
+  };
+
+  /// Items waiting on this device under accounts other than the current one.
+  static Future<int> pendingOnOtherAccounts() async {
+    final preferences = await SharedPreferences.getInstance();
+    final own = _key('');
+    var count = 0;
+    for (final key in preferences.getKeys()) {
+      if (!key.startsWith('offline_') || key.startsWith(own)) continue;
+      if (!_queueNames.any((name) => key.endsWith('_${name}_queue'))) continue;
+      try {
+        count +=
+            (jsonDecode(preferences.getString(key) ?? '[]') as List).length;
+      } catch (_) {}
+    }
+    return count;
+  }
+
+  /// Uploads everything waiting for this account. Returns how many were sent.
+  static Future<int> syncAll() async {
+    if (Supabase.instance.client.auth.currentUser == null) return 0;
+    var sent = 0;
+    for (final step in <Future<int> Function()>[
+      () => flush('customers', 'customers'),
+      () => flush('products', 'products'),
+      flushInvoiceDrafts,
+      flushPayments,
+    ]) {
+      try {
+        sent += await step();
+      } catch (_) {}
+    }
+    return sent;
+  }
+
   static Future<void> enqueue(String name, Map<String, dynamic> payload) =>
       OfflineQueue.add(_key('${name}_queue'), payload);
 
@@ -665,7 +716,9 @@ Future<String?> _pickAndEditImage(
     source: ImageSource.gallery,
     imageQuality: 95,
   );
-  if (image == null || !context.mounted) return null;
+  if (image == null) return null;
+  final pickedBytes = await image.readAsBytes();
+  if (!context.mounted) return null;
   var turns = 0;
   var cropSquare = false;
   final edit = await showDialog<(int, bool)?>(
@@ -683,8 +736,8 @@ Future<String?> _pickAndEditImage(
                 child: ClipRect(
                   child: RotatedBox(
                     quarterTurns: turns,
-                    child: Image.file(
-                      File(image.path),
+                    child: Image.memory(
+                      pickedBytes,
                       fit: cropSquare ? BoxFit.cover : BoxFit.contain,
                     ),
                   ),
@@ -730,8 +783,7 @@ Future<String?> _pickAndEditImage(
     ),
   );
   if (edit == null) return null;
-  final bytes = await image.readAsBytes();
-  final source = await ui.instantiateImageCodec(bytes);
+  final source = await ui.instantiateImageCodec(pickedBytes);
   final frame = await source.getNextFrame();
   final original = frame.image;
   final side = original.width < original.height
@@ -765,90 +817,10 @@ Future<String?> _pickAndEditImage(
   );
   final output = await recorder.endRecording().toImage(outWidth, outHeight);
   final png = await output.toByteData(format: ui.ImageByteFormat.png);
-  if (png == null) return image.path;
-  final path = '${image.path}.simplek.png';
-  await File(path).writeAsBytes(png.buffer.asUint8List(), flush: true);
-  return path;
-}
-
-class _SignaturePadDialog extends StatefulWidget {
-  const _SignaturePadDialog();
-
-  @override
-  State<_SignaturePadDialog> createState() => _SignaturePadDialogState();
-}
-
-class _SignaturePadDialogState extends State<_SignaturePadDialog> {
-  final _boundaryKey = GlobalKey();
-  final List<Offset?> _points = [];
-
-  Future<void> _save() async {
-    final boundary =
-        _boundaryKey.currentContext!.findRenderObject()
-            as RenderRepaintBoundary;
-    final image = await boundary.toImage(pixelRatio: 3);
-    final data = await image.toByteData(format: ui.ImageByteFormat.png);
-    if (data == null || !mounted) return;
-    final path =
-        '${Directory.systemTemp.path}${Platform.pathSeparator}simplek_signature_${DateTime.now().millisecondsSinceEpoch}.png';
-    await File(path).writeAsBytes(data.buffer.asUint8List(), flush: true);
-    if (mounted) Navigator.pop(context, path);
-  }
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Draw signature'),
-    content: RepaintBoundary(
-      key: _boundaryKey,
-      child: GestureDetector(
-        onPanStart: (details) =>
-            setState(() => _points.add(details.localPosition)),
-        onPanUpdate: (details) =>
-            setState(() => _points.add(details.localPosition)),
-        onPanEnd: (_) => setState(() => _points.add(null)),
-        child: CustomPaint(
-          painter: _SignaturePainter(_points),
-          child: const SizedBox(width: 320, height: 180),
-        ),
-      ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => setState(_points.clear),
-        child: const Text('Clear'),
-      ),
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('Cancel'),
-      ),
-      FilledButton(
-        onPressed: _points.isEmpty ? null : _save,
-        child: const Text('Use signature'),
-      ),
-    ],
+  return writeTempFile(
+    'simplek_image_${DateTime.now().millisecondsSinceEpoch}.png',
+    png?.buffer.asUint8List() ?? pickedBytes,
   );
-}
-
-class _SignaturePainter extends CustomPainter {
-  const _SignaturePainter(this.points);
-  final List<Offset?> points;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    canvas.drawRect(Offset.zero & size, Paint()..color = Colors.white);
-    final ink = Paint()
-      ..color = Colors.black
-      ..strokeWidth = 2.5
-      ..strokeCap = StrokeCap.round;
-    for (var i = 0; i < points.length - 1; i++) {
-      if (points[i] != null && points[i + 1] != null) {
-        canvas.drawLine(points[i]!, points[i + 1]!, ink);
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _SignaturePainter oldDelegate) => true;
 }
 
 Future<void> main() async {
@@ -860,7 +832,8 @@ Future<void> main() async {
   );
 
   await BusinessSettings.load();
-  await DesignSettings.load();
+  await AppLock.load();
+  LiveSync.changes.addListener(() => invoiceChanges.value++);
 
   runApp(const MyApp());
 }
@@ -872,90 +845,15 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF3157A4),
-      brightness: Brightness.light,
-    );
-    return ValueListenableBuilder<bool>(
-      valueListenable: DesignSettings.modern,
-      builder: (context, modern, _) => ValueListenableBuilder<ThemeMode>(
-        valueListenable: BusinessSettings.themeMode,
-        builder: (context, mode, _) => MaterialApp(
-          themeMode: mode,
-          darkTheme: modern
-              ? simplekTheme(Brightness.dark)
-              : ThemeData(
-                  useMaterial3: true,
-                  colorScheme: ColorScheme.fromSeed(
-                    seedColor: const Color(0xFF3157A4),
-                    brightness: Brightness.dark,
-                  ),
-                  inputDecorationTheme: InputDecorationTheme(
-                    filled: true,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    contentPadding: const EdgeInsets.all(16),
-                  ),
-                  filledButtonTheme: FilledButtonThemeData(
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(48, 52),
-                    ),
-                  ),
-                ),
-          debugShowCheckedModeBanner: false,
-          title: 'Simplek',
-          theme: modern
-              ? simplekTheme(Brightness.light)
-              : ThemeData(
-                  useMaterial3: true,
-                  colorScheme: colorScheme,
-                  scaffoldBackgroundColor: const Color(0xFFF6F7FB),
-                  appBarTheme: const AppBarTheme(
-                    backgroundColor: Color(0xFFF6F7FB),
-                    surfaceTintColor: Colors.transparent,
-                    centerTitle: false,
-                  ),
-                  inputDecorationTheme: InputDecorationTheme(
-                    filled: true,
-                    fillColor: Colors.white,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 16,
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: colorScheme.outlineVariant),
-                    ),
-                  ),
-                  cardTheme: CardThemeData(
-                    elevation: 0,
-                    color: Colors.white,
-                    margin: EdgeInsets.zero,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      side: BorderSide(color: colorScheme.outlineVariant),
-                    ),
-                  ),
-                  filledButtonTheme: FilledButtonThemeData(
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(48, 52),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                  floatingActionButtonTheme: FloatingActionButtonThemeData(
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                  ),
-                ),
-          home: home ?? const AppLaunchSplash(),
-        ),
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: BusinessSettings.themeMode,
+      builder: (context, mode, _) => MaterialApp(
+        themeMode: mode,
+        theme: simplekTheme(Brightness.light),
+        darkTheme: simplekTheme(Brightness.dark),
+        debugShowCheckedModeBanner: false,
+        title: 'Simplek',
+        home: home ?? const AppLaunchSplash(),
       ),
     );
   }
@@ -971,7 +869,7 @@ class _AppLaunchSplashState extends State<AppLaunchSplash> {
   @override
   void initState() {
     super.initState();
-    Future<void>.delayed(const Duration(milliseconds: 2600), () {
+    Future<void>.delayed(const Duration(milliseconds: kIsWeb ? 500 : 2600), () {
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         PageRouteBuilder<void>(
@@ -1003,7 +901,10 @@ class _AppLaunchSplashState extends State<AppLaunchSplash> {
   );
 }
 
-const _authRedirectUrl = 'simplek://login-callback/';
+/// Where the email sign-up link returns to: the app on phones, this page on
+/// the web.
+String get _authRedirectUrl =>
+    kIsWeb ? '${Uri.base.origin}${Uri.base.path}' : 'simplek://login-callback/';
 
 class PendingSignup {
   static const _nameKey = 'pending_signup_name';
@@ -1062,8 +963,13 @@ class _AuthGateState extends State<AuthGate> {
   }
 
   Future<void> _refresh() async {
+    LiveSync.sync();
     if (Supabase.instance.client.auth.currentSession != null) {
+      unawaited(OfflineStore.syncAll());
+      await BusinessAccess.restore();
       await BusinessSettings.syncFromCloud();
+    } else {
+      BusinessAccess.viewing.value = null;
     }
     final pendingSignup = await PendingSignup.load();
     if (mounted) {
@@ -1096,10 +1002,9 @@ class _AuthGateState extends State<AuthGate> {
         mobile: pendingSignup['mobile']!,
       );
     }
-    return ValueListenableBuilder<bool>(
-      valueListenable: DesignSettings.modern,
-      builder: (_, modern, _) =>
-          modern ? const _ModernHome() : const DashboardPage(),
+    return AppLockGate(
+      onUsePassword: () => Supabase.instance.client.auth.signOut(),
+      child: const _ModernHome(),
     );
   }
 }
@@ -1113,36 +1018,88 @@ void _returnToDashboard(BuildContext context) {
   Navigator.of(context).popUntil((route) => route.isFirst);
 }
 
+/// The signed-in app frame: bottom navigation on phones, a sidebar on wide
+/// screens such as the web app on a laptop.
 class _ModernHome extends StatelessWidget {
   const _ModernHome();
+
+  static const _wideBreakpoint = 900.0;
+  static const _moreIndex = 4;
+
+  /// Sidebar order on wide screens: (destination index, icon, label).
+  static const _sidebar = <(int, IconData, String)>[
+    (0, Icons.home_outlined, 'Home'),
+    (1, Icons.receipt_long_outlined, 'Invoices'),
+    (5, Icons.description_outlined, 'Quotations'),
+    (6, Icons.payments_outlined, 'Payments'),
+    (2, Icons.people_alt_outlined, 'Customers'),
+    (3, Icons.inventory_2_outlined, 'Products & Services'),
+    (7, Icons.bar_chart_outlined, 'Reports'),
+    (8, Icons.settings_outlined, 'Settings'),
+  ];
+
+  static Widget _page(int index) => switch (index) {
+    1 => const InvoiceHistoryPage(),
+    2 => const CustomersPage(),
+    3 => const ProductsPage(),
+    4 => const _MorePage(),
+    5 => const QuotationsPage(),
+    6 => const PaymentsPage(),
+    7 => const ReportsPage(),
+    8 => const BusinessSettingsPage(),
+    _ => const DashboardPage(),
+  };
 
   Future<void> _create(BuildContext context) async {
     final choice = await showModalBottomSheet<int>(
       context: context,
       isScrollControlled: true,
+      constraints: const BoxConstraints(maxWidth: 520),
       builder: (sheet) => SafeArea(
         child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: EditorSection(
-                  'Create something new',
-                  'Choose your next action.',
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+                child: Text(
+                  'Create',
+                  style: Theme.of(sheet).textTheme.headlineSmall,
                 ),
               ),
               for (final entry in const [
-                (Icons.receipt_long_outlined, 'New invoice'),
-                (Icons.description_outlined, 'New quotation'),
-                (Icons.payments_outlined, 'Record payment'),
+                (
+                  Icons.receipt_long_outlined,
+                  'New invoice',
+                  'Bill a customer and share the PDF',
+                  SimplekColors.brand,
+                ),
+                (
+                  Icons.description_outlined,
+                  'New quotation',
+                  'Send a price estimate first',
+                  SimplekColors.violet,
+                ),
+                (
+                  Icons.payments_outlined,
+                  'Record payment',
+                  'Mark money received on an invoice',
+                  SimplekColors.success,
+                ),
               ].indexed)
                 ListTile(
-                  leading: Icon(entry.$2.$1),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  leading: TintedIcon(entry.$2.$1, color: entry.$2.$4),
                   title: Text(entry.$2.$2),
+                  subtitle: Text(entry.$2.$3),
+                  trailing: const Icon(Icons.chevron_right),
                   onTap: () => Navigator.of(sheet).pop(entry.$1),
                 ),
-              const SizedBox(height: 16),
             ],
           ),
         ),
@@ -1157,52 +1114,667 @@ class _ModernHome extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => ValueListenableBuilder<int>(
+  Widget build(BuildContext context) => ValueListenableBuilder(
+    valueListenable: BusinessAccess.viewing,
+    builder: (context, viewing, _) => viewing == null
+        ? _frame(context)
+        : Material(
+            color: Theme.of(context).scaffoldBackgroundColor,
+            child: Column(
+              children: [
+                _ViewingBanner(name: viewing.name),
+                Expanded(
+                  child: MediaQuery.removePadding(
+                    context: context,
+                    removeTop: true,
+                    child: _frame(context),
+                  ),
+                ),
+              ],
+            ),
+          ),
+  );
+
+  Widget _frame(BuildContext context) => ValueListenableBuilder<int>(
     valueListenable: DesignSettings.destination,
-    builder: (context, index, _) => PopScope(
-      canPop: index == 0,
-      onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) DesignSettings.destination.value = 0;
+    builder: (context, index, _) => LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth >= _wideBreakpoint;
+        // "More" only exists on phones; its tools are in the sidebar.
+        final shown = wide && index == _moreIndex ? 0 : index;
+        final page = KeyedSubtree(key: ValueKey(shown), child: _page(shown));
+        return PopScope(
+          canPop: index == 0,
+          onPopInvokedWithResult: (didPop, result) {
+            if (!didPop) DesignSettings.destination.value = 0;
+          },
+          child: wide
+              ? Scaffold(
+                  body: Row(
+                    children: [
+                      _Sidebar(
+                        selected: shown,
+                        onCreate: () => _create(context),
+                      ),
+                      Expanded(
+                        child: Align(
+                          alignment: Alignment.topCenter,
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 1080),
+                            child: page,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              : Scaffold(
+                  body: page,
+                  floatingActionButton:
+                      !BusinessAccess.readOnly &&
+                          (index == 0 || index == _moreIndex)
+                      ? FloatingActionButton.extended(
+                          onPressed: () => _create(context),
+                          icon: const Icon(Icons.add),
+                          label: const Text('Create'),
+                        )
+                      : null,
+                  bottomNavigationBar: DecoratedBox(
+                    decoration: BoxDecoration(
+                      border: Border(
+                        top: BorderSide(
+                          color: Theme.of(context).colorScheme.outlineVariant,
+                        ),
+                      ),
+                    ),
+                    child: NavigationBar(
+                      selectedIndex: index > _moreIndex ? _moreIndex : index,
+                      onDestinationSelected: (value) =>
+                          DesignSettings.destination.value = value,
+                      destinations: const [
+                        NavigationDestination(
+                          icon: Icon(Icons.home_outlined),
+                          selectedIcon: Icon(Icons.home_rounded),
+                          label: 'Home',
+                        ),
+                        NavigationDestination(
+                          icon: Icon(Icons.receipt_long_outlined),
+                          selectedIcon: Icon(Icons.receipt_long),
+                          label: 'Invoices',
+                        ),
+                        NavigationDestination(
+                          icon: Icon(Icons.people_alt_outlined),
+                          selectedIcon: Icon(Icons.people_alt),
+                          label: 'Customers',
+                        ),
+                        NavigationDestination(
+                          icon: Icon(Icons.inventory_2_outlined),
+                          selectedIcon: Icon(Icons.inventory_2),
+                          label: 'Items',
+                        ),
+                        NavigationDestination(
+                          icon: Icon(Icons.grid_view_outlined),
+                          selectedIcon: Icon(Icons.grid_view_rounded),
+                          label: 'More',
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+        );
       },
-      child: Scaffold(
-        body: switch (index) {
-          1 => const InvoiceHistoryPage(),
-          2 => const CustomersPage(),
-          3 => const ProductsPage(),
-          4 => const _MorePage(),
-          _ => const DashboardPage(),
-        },
-        floatingActionButton: index == 0 || index == 4
-            ? FloatingActionButton.extended(
-                onPressed: () => _create(context),
+    ),
+  );
+}
+
+class _Sidebar extends StatelessWidget {
+  const _Sidebar({required this.selected, required this.onCreate});
+  final int selected;
+  final VoidCallback onCreate;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: 264,
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        border: Border(right: BorderSide(color: scheme.outlineVariant)),
+      ),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: Image.asset(
+                      'assets/branding/simplek-app-icon-hd.png',
+                      width: 38,
+                      height: 38,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  const Text(
+                    'Simplek',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.5,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 22),
+              FilledButton.icon(
+                onPressed: BusinessAccess.readOnly ? null : onCreate,
                 icon: const Icon(Icons.add),
                 label: const Text('Create'),
-              )
-            : null,
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: index,
-          labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
-          onDestinationSelected: (value) =>
-              DesignSettings.destination.value = value,
-          destinations: const [
-            NavigationDestination(
-              icon: Icon(Icons.grid_view_outlined),
-              selectedIcon: Icon(Icons.grid_view_rounded),
-              label: 'Home',
+              ),
+              const SizedBox(height: 18),
+              Expanded(
+                child: ListView(
+                  children: [
+                    for (final item in _ModernHome._sidebar)
+                      if (!(BusinessAccess.readOnly && item.$1 == 8))
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: ListTile(
+                            dense: true,
+                            selected: item.$1 == selected,
+                            selectedTileColor: scheme.primaryContainer,
+                            selectedColor: scheme.onPrimaryContainer,
+                            shape: const StadiumBorder(),
+                            leading: Icon(item.$2),
+                            title: Text(
+                              item.$3,
+                              style: TextStyle(
+                                fontSize: 14.5,
+                                fontWeight: item.$1 == selected
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
+                              ),
+                            ),
+                            onTap: () =>
+                                DesignSettings.destination.value = item.$1,
+                          ),
+                        ),
+                    ListTile(
+                      dense: true,
+                      shape: const StadiumBorder(),
+                      leading: const Icon(Icons.search),
+                      title: const Text(
+                        'Search',
+                        style: TextStyle(fontSize: 14.5),
+                      ),
+                      onTap: () => _openPage(context, const GlobalSearchPage()),
+                    ),
+                    ListTile(
+                      dense: true,
+                      shape: const StadiumBorder(),
+                      leading: const Icon(Icons.supervisor_account_outlined),
+                      title: const Text(
+                        'Accountant access',
+                        style: TextStyle(fontSize: 14.5),
+                      ),
+                      onTap: () =>
+                          _openPage(context, const AccountantAccessPage()),
+                    ),
+                    ListTile(
+                      dense: true,
+                      shape: const StadiumBorder(),
+                      leading: const Icon(Icons.cloud_sync_outlined),
+                      title: const Text(
+                        'Sync & backup',
+                        style: TextStyle(fontSize: 14.5),
+                      ),
+                      onTap: () => _openPage(context, const SyncCenterPage()),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              ValueListenableBuilder<ThemeMode>(
+                valueListenable: BusinessSettings.themeMode,
+                builder: (context, mode, _) => ThemeModeToggle(
+                  mode: mode,
+                  onChanged: BusinessSettings.setThemeMode,
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextButton.icon(
+                onPressed: () => _confirmLogout(context),
+                icon: const Icon(Icons.logout),
+                label: const Text('Log out'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+Future<void> _confirmLogout(BuildContext context) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialog) => AlertDialog(
+      title: const Text('Log out of Simplek?'),
+      content: const Text('You will need your password to log in again.'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialog, false),
+          child: const Text('Stay'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(dialog, true),
+          child: const Text('Log out'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed == true) await Supabase.instance.client.auth.signOut();
+}
+
+class _MorePage extends StatelessWidget {
+  const _MorePage();
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final profile = BusinessSettings.profile.value;
+    final business = profile['name'] ?? '';
+    return Scaffold(
+      appBar: AppBar(title: const Text('More')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 104),
+        children: [
+          Card(
+            clipBehavior: Clip.antiAlias,
+            child: ListTile(
+              contentPadding: const EdgeInsets.all(16),
+              leading: CircleAvatar(
+                radius: 26,
+                backgroundColor: theme.colorScheme.primaryContainer,
+                foregroundColor: theme.colorScheme.onPrimaryContainer,
+                child: Text(
+                  business.trim().isEmpty
+                      ? 'S'
+                      : business.trim()[0].toUpperCase(),
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              title: Text(
+                business.isEmpty ? 'Your business' : business,
+                style: theme.textTheme.titleLarge,
+              ),
+              subtitle: const Text('Business profile and settings'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: BusinessAccess.readOnly
+                  ? null
+                  : () => _openPage(context, const BusinessSettingsPage()),
             ),
-            NavigationDestination(
-              icon: Icon(Icons.receipt_long_outlined),
-              label: 'Invoices',
+          ),
+          const SizedBox(height: 22),
+          Text('Tools', style: theme.textTheme.titleLarge),
+          const SizedBox(height: 10),
+          Card(
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                for (final (index, entry)
+                    in <(IconData, String, String, Color, Widget)>[
+                      (
+                        Icons.description_outlined,
+                        'Quotations',
+                        'Estimates you can convert to invoices',
+                        SimplekColors.violet,
+                        const QuotationsPage(),
+                      ),
+                      (
+                        Icons.payments_outlined,
+                        'Payments',
+                        'Record money received',
+                        SimplekColors.success,
+                        const PaymentsPage(),
+                      ),
+                      (
+                        Icons.bar_chart_outlined,
+                        'Reports',
+                        'Sales, GST and exports',
+                        SimplekColors.warning,
+                        const ReportsPage(),
+                      ),
+                      (
+                        Icons.search,
+                        'Search everything',
+                        'Customers, items and documents',
+                        SimplekColors.brand,
+                        const GlobalSearchPage(),
+                      ),
+                      (
+                        Icons.supervisor_account_outlined,
+                        'Accountant access',
+                        'Share your business, view-only',
+                        SimplekColors.violet,
+                        const AccountantAccessPage(),
+                      ),
+                      (
+                        Icons.cloud_sync_outlined,
+                        'Sync & backup',
+                        'Upload anything still on this device',
+                        SimplekColors.success,
+                        const SyncCenterPage(),
+                      ),
+                    ].indexed) ...[
+                  if (index > 0) const Divider(indent: 72),
+                  ListTile(
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 6,
+                    ),
+                    leading: TintedIcon(entry.$1, color: entry.$4),
+                    title: Text(entry.$2),
+                    subtitle: Text(entry.$3),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => _openPage(context, entry.$5),
+                  ),
+                ],
+              ],
             ),
-            NavigationDestination(
-              icon: Icon(Icons.people_outline),
-              label: 'Customers',
+          ),
+          const SizedBox(height: 22),
+          Text('Appearance', style: theme.textTheme.titleLarge),
+          const SizedBox(height: 10),
+          ValueListenableBuilder<ThemeMode>(
+            valueListenable: BusinessSettings.themeMode,
+            builder: (context, mode, _) => ThemeModeToggle(
+              mode: mode,
+              onChanged: BusinessSettings.setThemeMode,
             ),
-            NavigationDestination(
-              icon: Icon(Icons.inventory_2_outlined),
-              label: 'Products',
+          ),
+          const SizedBox(height: 16),
+          const AppLockSetting(),
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            onPressed: () => _confirmLogout(context),
+            icon: const Icon(Icons.logout),
+            label: const Text('Log out'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Shown when a save cannot reach the server. Nothing is kept on the device.
+class _NotSavedOffline implements Exception {
+  const _NotSavedOffline();
+  static const message =
+      'No internet connection. Nothing was saved. Connect and try again.';
+  @override
+  String toString() => message;
+}
+
+/// Uploads anything an earlier version of the app left waiting on this device.
+class SyncCenterPage extends StatefulWidget {
+  const SyncCenterPage({super.key});
+
+  @override
+  State<SyncCenterPage> createState() => _SyncCenterPageState();
+}
+
+class _SyncCenterPageState extends State<SyncCenterPage> {
+  Map<String, int> _pending = const {};
+  int _otherAccounts = 0;
+  bool _loading = true;
+  bool _syncing = false;
+  String? _result;
+
+  static const _labels = {
+    'customers': 'Customers',
+    'products': 'Products and services',
+    'invoice_drafts': 'Invoices',
+    'payments': 'Payments',
+  };
+
+  int get _total => _pending.values.fold(0, (sum, count) => sum + count);
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    final pending = await OfflineStore.pendingCounts();
+    final others = await OfflineStore.pendingOnOtherAccounts();
+    if (!mounted) return;
+    setState(() {
+      _pending = pending;
+      _otherAccounts = others;
+      _loading = false;
+    });
+  }
+
+  Future<void> _sync() async {
+    setState(() {
+      _syncing = true;
+      _result = null;
+    });
+    final uploaded = await OfflineStore.syncAll();
+    await _refresh();
+    if (!mounted) return;
+    setState(() {
+      _syncing = false;
+      _result = _total == 0
+          ? (uploaded == 0
+                ? 'Nothing was waiting. Everything is already on the server.'
+                : 'Uploaded $uploaded item${uploaded == 1 ? '' : 's'}. Everything is now on the server.')
+          : 'Uploaded $uploaded. $_total still waiting. Check your internet connection and try again.';
+    });
+    for (final entry in <(String, String Function(Map<String, dynamic>))>[
+      ('customers', (item) => 'Customer "${item['name'] ?? ''}"'),
+      ('products', (item) => 'Product or service "${item['name'] ?? ''}"'),
+      (
+        'invoice_drafts',
+        (item) =>
+            'Invoice for ${(item['header'] as Map?)?['customer_name'] ?? 'a customer'}',
+      ),
+      ('payments', (item) => 'Payment of ₹${item['p_amount']}'),
+    ]) {
+      if (!mounted) return;
+      await _showSyncRejections(context, entry.$1, entry.$2);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final clear = _total == 0;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Sync & backup')),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
+              children: [
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        TintedIcon(
+                          clear
+                              ? Icons.cloud_done_outlined
+                              : Icons.cloud_upload_outlined,
+                          color: clear
+                              ? SimplekColors.success
+                              : SimplekColors.warning,
+                          size: 56,
+                        ),
+                        const SizedBox(height: 14),
+                        Text(
+                          clear
+                              ? 'Everything is on the server'
+                              : '$_total item${_total == 1 ? '' : 's'} on this device not uploaded yet',
+                          style: theme.textTheme.titleLarge,
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          clear
+                              ? 'Nothing from this account is waiting on this device.'
+                              : 'These were saved while offline. Upload them so they are safe and visible on the web.',
+                          style: TextStyle(color: muted),
+                        ),
+                        if (!clear) ...[
+                          const SizedBox(height: 14),
+                          for (final entry in _pending.entries)
+                            if (entry.value > 0)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 6),
+                                child: Row(
+                                  children: [
+                                    Expanded(child: Text(_labels[entry.key]!)),
+                                    Text(
+                                      '${entry.value}',
+                                      style: theme.textTheme.titleMedium,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                        ],
+                        const SizedBox(height: 16),
+                        FilledButton.icon(
+                          onPressed: _syncing ? null : _sync,
+                          icon: _syncing
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.sync),
+                          label: Text(
+                            _syncing
+                                ? 'Uploading...'
+                                : clear
+                                ? 'Check again'
+                                : 'Upload to server now',
+                          ),
+                        ),
+                        if (_result != null) ...[
+                          const SizedBox(height: 12),
+                          Text(_result!),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+                if (_otherAccounts > 0) ...[
+                  const SizedBox(height: 14),
+                  Card(
+                    child: ListTile(
+                      contentPadding: const EdgeInsets.all(16),
+                      leading: const TintedIcon(
+                        Icons.switch_account_outlined,
+                        color: SimplekColors.warning,
+                      ),
+                      title: Text(
+                        '$_otherAccounts item${_otherAccounts == 1 ? '' : 's'} waiting under another account',
+                      ),
+                      subtitle: const Text(
+                        'Log out, log in to that account on this device, and open Sync & backup there.',
+                      ),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 22),
+                Text('How saving works', style: theme.textTheme.titleLarge),
+                const SizedBox(height: 8),
+                Text(
+                  'Invoices, quotations, payments, customers and products are '
+                  'saved straight to the server, so they appear on the web and '
+                  'on your other devices. If there is no internet, the app '
+                  'tells you and saves nothing.',
+                  style: TextStyle(color: muted),
+                ),
+              ],
             ),
-            NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
+    );
+  }
+}
+
+/// Switches the whole app to a shared business, or back to your own (null).
+Future<void> _switchBusiness(
+  BuildContext context,
+  String? ownerId, {
+  String name = 'Business',
+}) async {
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    await BusinessAccess.view(ownerId, name: name);
+    await BusinessSettings.syncFromCloud(clearIfMissing: true);
+    invoiceChanges.value++;
+    if (context.mounted) _returnToDashboard(context);
+  } catch (error) {
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          _connectionMessage(
+            error,
+            fallback: 'Could not switch business. Please try again.',
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Shown above the app while an accountant is looking at a client's business.
+class _ViewingBanner extends StatelessWidget {
+  const _ViewingBanner({required this.name});
+  final String name;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: SimplekColors.warning,
+    child: SafeArea(
+      bottom: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 6, 4),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.visibility_outlined,
+              color: Colors.white,
+              size: 20,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Viewing $name  •  view only',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () => _switchBusiness(context, null),
+              style: TextButton.styleFrom(foregroundColor: Colors.white),
+              child: const Text('Exit'),
+            ),
           ],
         ),
       ),
@@ -1210,50 +1782,293 @@ class _ModernHome extends StatelessWidget {
   );
 }
 
-class _MorePage extends StatelessWidget {
-  const _MorePage();
+/// Owners choose who may view their business; accountants open what has been
+/// shared with them.
+class AccountantAccessPage extends StatefulWidget {
+  const AccountantAccessPage({super.key});
+
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('More')),
-    body: ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        const EditorSection(
-          'Your business tools',
-          'Documents, payments and preferences.',
+  State<AccountantAccessPage> createState() => _AccountantAccessPageState();
+}
+
+class _AccountantAccessPageState extends State<AccountantAccessPage> {
+  final _emailController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  List<Map<String, dynamic>> _invites = [];
+  List<Map<String, dynamic>> _shared = [];
+  bool _loading = true;
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    try {
+      final results = await Future.wait([
+        BusinessAccess.readOnly
+            ? Future.value(<Map<String, dynamic>>[])
+            : BusinessAccess.invites(),
+        BusinessAccess.sharedWithMe(),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _invites = results[0];
+        _shared = results[1];
+        _error = null;
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = _connectionMessage(
+          error,
+          fallback: 'Could not load accountant access. Please try again.',
+        );
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _invite() async {
+    if (!_formKey.currentState!.validate() || _saving) return;
+    setState(() => _saving = true);
+    final messenger = ScaffoldMessenger.of(context);
+    final email = _emailController.text.trim().toLowerCase();
+    try {
+      await BusinessAccess.invite(email);
+      _emailController.clear();
+      messenger.showSnackBar(
+        SnackBar(content: Text('$email can now view your business')),
+      );
+      await _load();
+    } on PostgrestException catch (error) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(switch (error.code) {
+            '23505' => '$email already has access.',
+            '42501' => 'You cannot give access to your own email.',
+            _ => 'Could not give access: ${error.message}',
+          }),
         ),
-        for (final entry in <(IconData, String, Widget)>[
-          (Icons.description_outlined, 'Quotations', const QuotationsPage()),
-          (Icons.payments_outlined, 'Payments', const PaymentsPage()),
-          (Icons.bar_chart_outlined, 'Reports', const ReportsPage()),
-          (Icons.search, 'Search everything', const GlobalSearchPage()),
-          (
-            Icons.settings_outlined,
-            'Business Profile & Settings',
-            const BusinessSettingsPage(),
+      );
+    } catch (error) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            _connectionMessage(error, fallback: 'Could not give access.'),
           ),
-        ])
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Card(
-              child: ListTile(
-                contentPadding: const EdgeInsets.all(16),
-                leading: Icon(entry.$1),
-                title: Text(entry.$2),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => _openPage(context, entry.$3),
-              ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _remove(Map<String, dynamic> invite) async {
+    final email = invite['accountant_email']?.toString() ?? '';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: const Text('Remove access?'),
+        content: Text('$email will no longer be able to view your business.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialog, false),
+            child: const Text('Keep'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialog, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await BusinessAccess.remove(invite['id'].toString());
+      await _load();
+    } catch (error) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            _connectionMessage(error, fallback: 'Could not remove access.'),
+          ),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final viewing = BusinessAccess.viewing.value;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Accountant access')),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
+              children: [
+                if (_error != null)
+                  Card(
+                    child: ListTile(
+                      leading: const TintedIcon(
+                        Icons.cloud_off_outlined,
+                        color: SimplekColors.warning,
+                      ),
+                      title: Text(_error!),
+                      trailing: TextButton(
+                        onPressed: _load,
+                        child: const Text('Retry'),
+                      ),
+                    ),
+                  ),
+                if (viewing == null) ...[
+                  Text(
+                    'Who can view your business',
+                    style: theme.textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Give your accountant view-only access to your invoices, '
+                    'quotations, customers and GST reports. They log in with '
+                    'their own Simplek account and cannot change anything.',
+                    style: TextStyle(color: muted),
+                  ),
+                  const SizedBox(height: 14),
+                  Form(
+                    key: _formKey,
+                    child: TextFormField(
+                      controller: _emailController,
+                      keyboardType: TextInputType.emailAddress,
+                      autocorrect: false,
+                      decoration: const InputDecoration(
+                        labelText: "Accountant's email",
+                        helperText:
+                            'Use the email they sign up to Simplek with.',
+                        prefixIcon: Icon(Icons.alternate_email),
+                      ),
+                      validator: _emailValidator,
+                      onFieldSubmitted: (_) => _invite(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    onPressed: _saving ? null : _invite,
+                    icon: const Icon(Icons.person_add_alt_outlined),
+                    label: Text(_saving ? 'Giving access...' : 'Give access'),
+                  ),
+                  const SizedBox(height: 16),
+                  if (_invites.isEmpty)
+                    Text(
+                      'No one else can view your business.',
+                      style: TextStyle(color: muted),
+                    )
+                  else
+                    Card(
+                      clipBehavior: Clip.antiAlias,
+                      child: Column(
+                        children: [
+                          for (final (index, invite) in _invites.indexed) ...[
+                            if (index > 0) const Divider(indent: 72),
+                            ListTile(
+                              leading: const TintedIcon(
+                                Icons.visibility_outlined,
+                              ),
+                              title: Text(
+                                invite['accountant_email']?.toString() ?? '',
+                              ),
+                              subtitle: const Text('Can view, cannot edit'),
+                              trailing: IconButton(
+                                tooltip: 'Remove access',
+                                onPressed: () => _remove(invite),
+                                icon: const Icon(Icons.person_remove_outlined),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  const SizedBox(height: 28),
+                ],
+                if (viewing != null) ...[
+                  Card(
+                    child: ListTile(
+                      contentPadding: const EdgeInsets.all(16),
+                      leading: const TintedIcon(
+                        Icons.visibility_outlined,
+                        color: SimplekColors.warning,
+                      ),
+                      title: Text('You are viewing ${viewing.name}'),
+                      subtitle: const Text(BusinessAccess.readOnlyMessage),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    onPressed: () => _switchBusiness(context, null),
+                    icon: const Icon(Icons.logout),
+                    label: const Text('Return to my business'),
+                  ),
+                  const SizedBox(height: 28),
+                ],
+                if (_shared.isNotEmpty) ...[
+                  Text('Shared with you', style: theme.textTheme.titleLarge),
+                  const SizedBox(height: 10),
+                  Card(
+                    clipBehavior: Clip.antiAlias,
+                    child: Column(
+                      children: [
+                        for (final (index, business) in _shared.indexed) ...[
+                          if (index > 0) const Divider(indent: 72),
+                          ListTile(
+                            leading: const TintedIcon(
+                              Icons.storefront_outlined,
+                              color: SimplekColors.violet,
+                            ),
+                            title: Text(
+                              business['business_name']?.toString() ??
+                                  'Business',
+                            ),
+                            subtitle: Text(
+                              business['viewing'] == true
+                                  ? 'Viewing now'
+                                  : 'View only',
+                            ),
+                            trailing: business['viewing'] == true
+                                ? null
+                                : FilledButton.tonal(
+                                    onPressed: () => _switchBusiness(
+                                      context,
+                                      business['owner_id'].toString(),
+                                      name:
+                                          business['business_name']
+                                              ?.toString() ??
+                                          'Business',
+                                    ),
+                                    child: const Text('View'),
+                                  ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ],
             ),
-          ),
-        const SizedBox(height: 16),
-        TextButton.icon(
-          onPressed: () async => Supabase.instance.client.auth.signOut(),
-          icon: const Icon(Icons.logout),
-          label: const Text('Log out'),
-        ),
-      ],
-    ),
-  );
+    );
+  }
 }
 
 class LoginPage extends StatefulWidget {
@@ -1275,6 +2090,12 @@ class _LoginPageState extends State<LoginPage> {
   void initState() {
     super.initState();
     _loadRememberedEmail();
+    // The website's "Sign up" button opens the web app with ?signup=1.
+    if (kIsWeb && Uri.base.queryParameters['signup'] == '1') {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _openPage(context, const SignupPage());
+      });
+    }
   }
 
   Future<void> _loadRememberedEmail() async {
@@ -1295,6 +2116,7 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _loading = true);
     try {
       final email = _emailController.text.trim().toLowerCase();
+      AppLock.markSignedInWithPassword();
       await Supabase.instance.client.auth.signInWithPassword(
         email: email,
         password: _passwordController.text,
@@ -1342,27 +2164,40 @@ class _LoginPageState extends State<LoginPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Image.asset(
-                    'assets/branding/simplek-logo-hd.png',
-                    height: 180,
-                    fit: BoxFit.contain,
-                    semanticLabel: 'Simplek logo',
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(18),
+                      child: Image.asset(
+                        'assets/branding/simplek-app-icon-hd.png',
+                        width: 68,
+                        height: 68,
+                        semanticLabel: 'Simplek logo',
+                      ),
+                    ),
                   ),
-                  const SizedBox(height: 28),
+                  const SizedBox(height: 24),
+                  Text(
+                    'Welcome back',
+                    style: Theme.of(context).textTheme.headlineMedium,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Log in to send invoices and track payments.',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      fontSize: 15,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
                   Card(
                     child: Padding(
-                      padding: const EdgeInsets.all(22),
+                      padding: const EdgeInsets.all(20),
                       child: Form(
                         key: _formKey,
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Text(
-                              'Login',
-                              style: Theme.of(context).textTheme.headlineMedium
-                                  ?.copyWith(color: Colors.indigo),
-                            ),
-                            const SizedBox(height: 22),
                             TextFormField(
                               controller: _emailController,
                               keyboardType: TextInputType.emailAddress,
@@ -1423,14 +2258,17 @@ class _LoginPageState extends State<LoginPage> {
                                       ),
                                     )
                                   : const Icon(Icons.login),
-                              label: Text(_loading ? 'Logging in...' : 'Login'),
+                              label: Text(
+                                _loading ? 'Logging in...' : 'Log in',
+                              ),
                             ),
                             const SizedBox(height: 12),
-                            OutlinedButton.icon(
+                            TextButton(
                               onPressed: () =>
                                   _openPage(context, const SignupPage()),
-                              icon: const Icon(Icons.person_add_alt_1_outlined),
-                              label: const Text('New user? Please sign up'),
+                              child: const Text(
+                                'New to Simplek? Create an account',
+                              ),
                             ),
                           ],
                         ),
@@ -2074,7 +2912,7 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
   Future<void> _drawSignature() async {
     final path = await showDialog<String>(
       context: context,
-      builder: (_) => const _SignaturePadDialog(),
+      builder: (_) => const SignaturePadDialog(),
     );
     if (path != null && mounted) setState(() => _signaturePath = path);
   }
@@ -2089,15 +2927,12 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
       _lookingUpIfsc = true;
       _ifscMessage = null;
     });
-    final client = HttpClient();
     try {
-      final response = await (await client.getUrl(
+      final response = await http.get(
         Uri.parse('https://ifsc.razorpay.com/$ifsc'),
-      )).close();
-      if (response.statusCode != 200) throw const HttpException('Not found');
-      final data =
-          jsonDecode(await response.transform(utf8.decoder).join())
-              as Map<String, dynamic>;
+      );
+      if (response.statusCode != 200) throw StateError('Not found');
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
       if (!mounted) return;
       setState(() {
         _bankNameController.text = data['BANK']?.toString() ?? '';
@@ -2109,7 +2944,6 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
         setState(() => _ifscMessage = 'Unable to verify this IFSC right now.');
       }
     } finally {
-      client.close(force: true);
       if (mounted) setState(() => _lookingUpIfsc = false);
     }
   }
@@ -2662,8 +3496,8 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
             child: Column(
               children: [
                 Expanded(
-                  child: path.isNotEmpty && File(path).existsSync()
-                      ? Image.file(File(path), fit: BoxFit.contain)
+                  child: localFileExists(path)
+                      ? localImage(path)
                       : const Icon(
                           Icons.add_photo_alternate_outlined,
                           size: 34,
@@ -3025,492 +3859,54 @@ class _DashboardPageState extends State<DashboardPage> {
             onPressed: _isLoadingSummary ? null : _loadSummary,
             icon: const Icon(Icons.refresh),
           ),
-          IconButton(
-            tooltip: 'Settings',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => const BusinessSettingsPage(),
-              ),
-            ),
-            icon: const Icon(Icons.settings_outlined),
+          Builder(
+            builder: (context) {
+              final dark = Theme.of(context).brightness == Brightness.dark;
+              return IconButton(
+                tooltip: dark ? 'Switch to light mode' : 'Switch to dark mode',
+                onPressed: () => BusinessSettings.setThemeMode(
+                  dark ? ThemeMode.light : ThemeMode.dark,
+                ),
+                icon: Icon(
+                  dark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+                ),
+              );
+            },
           ),
           const SizedBox(width: 8),
         ],
       ),
 
-      drawer: DesignSettings.modern.value
-          ? null
-          : Drawer(
-              child: SafeArea(
-                child: ListView(
-                  padding: EdgeInsets.zero,
-                  children: [
-                    DrawerHeader(
-                      decoration: const BoxDecoration(color: Colors.indigo),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          Image.asset(
-                            'assets/branding/simplek-app-icon-hd.png',
-                            width: 48,
-                            height: 48,
-                          ),
-                          const SizedBox(height: 10),
-                          const Text(
-                            'Simplek',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const Text(
-                            'Invoicing made easy',
-                            style: TextStyle(color: Colors.white70),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    ListTile(
-                      leading: const Icon(Icons.dashboard_outlined),
-                      title: const Text('Dashboard'),
-                      selected: true,
-                      onTap: () => Navigator.pop(context),
-                    ),
-
-                    ListTile(
-                      leading: const Icon(Icons.people_outline),
-                      title: const Text('Customers'),
-                      onTap: () {
-                        final navigator = Navigator.of(context);
-                        navigator.pop();
-                        navigator.push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => const CustomersPage(),
-                          ),
-                        );
-                      },
-                    ),
-
-                    ListTile(
-                      leading: const Icon(Icons.inventory_2_outlined),
-                      title: const Text('Products & Services'),
-                      onTap: () => _openPage(context, const ProductsPage()),
-                    ),
-
-                    ListTile(
-                      leading: const Icon(Icons.receipt_long_outlined),
-                      title: const Text('Invoices'),
-                      onTap: () =>
-                          _openPage(context, const InvoiceHistoryPage()),
-                    ),
-
-                    ListTile(
-                      leading: const Icon(Icons.description_outlined),
-                      title: const Text('Quotations'),
-                      onTap: () => _openPage(context, const QuotationsPage()),
-                    ),
-
-                    ListTile(
-                      leading: const Icon(Icons.payments_outlined),
-                      title: const Text('Payments'),
-                      onTap: () => _openPage(context, const PaymentsPage()),
-                    ),
-
-                    ListTile(
-                      leading: const Icon(Icons.bar_chart_outlined),
-                      title: const Text('Reports'),
-                      onTap: () => _openPage(context, const ReportsPage()),
-                    ),
-
-                    const Divider(),
-
-                    ListTile(
-                      leading: const Icon(Icons.settings_outlined),
-                      title: const Text('Business Profile & Settings'),
-                      onTap: () =>
-                          _openPage(context, const BusinessSettingsPage()),
-                    ),
-                    const Divider(),
-                    ListTile(
-                      leading: const Icon(Icons.logout),
-                      title: const Text('Log out'),
-                      onTap: () async {
-                        Navigator.pop(context);
-                        await Supabase.instance.client.auth.signOut();
-                      },
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-      body: DesignSettings.modern.value
-          ? ModernOverview(
-              sales: _money(_totalSales),
-              outstanding: _money(_outstanding),
-              invoiceCount: '$_invoiceCount',
-              customerCount: '$_customerCount',
-              productCount: '$_productCount',
-              loading: _isLoadingSummary,
-              error: _summaryError,
-              recent: _recentInvoices
-                  .map(
-                    (row) => <String, String>{
-                      'number': row['invoice_number']?.toString() ?? 'Invoice',
-                      'customer': row['customer_name']?.toString() ?? '',
-                      'amount': _money(_asDouble(row['total_amount'])),
-                      'status': row['status']?.toString() ?? 'draft',
-                      'date': row['invoice_date']?.toString() ?? '',
-                    },
-                  )
-                  .toList(),
-              onNewInvoice: () =>
-                  _openPage(context, const InvoiceBuilderPage()),
-              onNewQuotation: () =>
-                  _openPage(context, const QuotationBuilderPage()),
-              onCustomer: () async {
-                await _showCustomerForm(context);
-                if (mounted) await _loadSummary();
+      body: ModernOverview(
+        businessName: BusinessSettings.profile.value['name'] ?? '',
+        readOnly: BusinessAccess.readOnly,
+        sales: _money(_totalSales),
+        outstanding: _money(_outstanding),
+        invoiceCount: '$_invoiceCount',
+        customerCount: '$_customerCount',
+        productCount: '$_productCount',
+        loading: _isLoadingSummary,
+        error: _summaryError,
+        recent: _recentInvoices
+            .map(
+              (row) => <String, String>{
+                'number': row['invoice_number']?.toString() ?? 'Invoice',
+                'customer': row['customer_name']?.toString() ?? '',
+                'amount': _money(_asDouble(row['total_amount'])),
+                'status': row['status']?.toString() ?? 'draft',
+                'date': row['invoice_date']?.toString() ?? '',
               },
-              onProduct: () => _openPage(context, const AddProductPage()),
-              onInvoices: () => DesignSettings.destination.value = 1,
-              onRefresh: _loadSummary,
             )
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Dashboard',
-                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-                  ),
-
-                  const SizedBox(height: 4),
-
-                  Text(
-                    'Here is your business overview',
-                    style: TextStyle(color: Colors.grey.shade600, fontSize: 15),
-                  ),
-
-                  if (_summaryError != null) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      'Unable to refresh dashboard: $_summaryError',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
-                      ),
-                    ),
-                  ],
-
-                  const SizedBox(height: 24),
-
-                  // Summary cards
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _summaryCard(
-                          title: 'Total Sales',
-                          value: _money(_totalSales),
-                          icon: Icons.trending_up,
-                          iconColor: Colors.green,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _summaryCard(
-                          title: 'Outstanding',
-                          value: _money(_outstanding),
-                          icon: Icons.account_balance_wallet_outlined,
-                          iconColor: Colors.orange,
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _summaryCard(
-                          title: 'Invoices',
-                          value: _invoiceCount.toString(),
-                          icon: Icons.receipt_long_outlined,
-                          iconColor: Colors.indigo,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _summaryCard(
-                          title: 'Customers',
-                          value: _customerCount.toString(),
-                          icon: Icons.people_outline,
-                          iconColor: Colors.purple,
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 28),
-
-                  const Text(
-                    'Quick Actions',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _actionButton(
-                          icon: Icons.add,
-                          title: 'New Invoice',
-                          color: Colors.indigo,
-                          onTap: () =>
-                              _openPage(context, const InvoiceBuilderPage()),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _actionButton(
-                          icon: Icons.person_add_outlined,
-                          title: 'New Customer',
-                          color: Colors.green,
-                          onTap: () {
-                            debugPrint('NEW CUSTOMER TAPPED');
-                            _showCustomerForm(context);
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _actionButton(
-                          icon: Icons.inventory_2_outlined,
-                          title: 'Add Product',
-                          color: Colors.orange,
-                          onTap: () => _openPage(context, const ProductsPage()),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _actionButton(
-                          icon: Icons.payment_outlined,
-                          title: 'Record Payment',
-                          color: Colors.purple,
-                          onTap: () async {
-                            await Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) => const PaymentsPage(),
-                              ),
-                            );
-                            await _loadSummary();
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 28),
-
-                  const Text(
-                    'Recent Invoices',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  if (_isLoadingSummary)
-                    const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(24),
-                        child: CircularProgressIndicator(),
-                      ),
-                    )
-                  else if (_recentInvoices.isEmpty)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(28),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surface,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Column(
-                        children: [
-                          Icon(
-                            Icons.receipt_long_outlined,
-                            size: 52,
-                            color: Colors.grey.shade400,
-                          ),
-                          const SizedBox(height: 12),
-                          const Text(
-                            'No invoices yet',
-                            style: TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            'Create your first invoice to get started.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: Colors.grey.shade600),
-                          ),
-                          const SizedBox(height: 18),
-                          FilledButton.icon(
-                            onPressed: () =>
-                                _openPage(context, const InvoiceBuilderPage()),
-                            icon: const Icon(Icons.add),
-                            label: const Text('Create Invoice'),
-                          ),
-                        ],
-                      ),
-                    )
-                  else
-                    Card(
-                      clipBehavior: Clip.antiAlias,
-                      child: Column(
-                        children: List.generate(_recentInvoices.length, (
-                          index,
-                        ) {
-                          final invoice = _recentInvoices[index];
-                          final status =
-                              invoice['status']?.toString() ?? 'draft';
-                          return Column(
-                            children: [
-                              ListTile(
-                                leading: CircleAvatar(
-                                  child: Icon(
-                                    status == 'paid'
-                                        ? Icons.check
-                                        : Icons.receipt_long_outlined,
-                                  ),
-                                ),
-                                title: Text(
-                                  invoice['invoice_number']?.toString() ??
-                                      'Invoice',
-                                ),
-                                subtitle: Text(
-                                  '${invoice['customer_name'] ?? ''} • ${invoice['invoice_date'] ?? ''}\n${status.toUpperCase()}',
-                                ),
-                                isThreeLine: true,
-                                trailing: Text(
-                                  _money(_asDouble(invoice['total_amount'])),
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                onTap: () => _openPage(
-                                  context,
-                                  const InvoiceHistoryPage(),
-                                ),
-                              ),
-                              if (index < _recentInvoices.length - 1)
-                                const Divider(height: 1),
-                            ],
-                          );
-                        }),
-                      ),
-                    ),
-
-                  const SizedBox(height: 24),
-
-                  // Supabase status
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: Colors.green.shade50,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.green.shade200),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.cloud_done_outlined, color: Colors.green),
-                        SizedBox(width: 10),
-                        Text(
-                          'Supabase connected',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: Colors.green,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-    );
-  }
-
-  Widget _summaryCard({
-    required String title,
-    required String value,
-    required IconData icon,
-    required Color iconColor,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: iconColor, size: 28),
-          const SizedBox(height: 14),
-          Text(
-            title,
-            style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _actionButton({
-    required IconData icon,
-    required String title,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 12),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Column(
-          children: [
-            Icon(icon, color: color, size: 30),
-            const SizedBox(height: 8),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-          ],
-        ),
+            .toList(),
+        onNewInvoice: () => _openPage(context, const InvoiceBuilderPage()),
+        onNewQuotation: () => _openPage(context, const QuotationBuilderPage()),
+        onCustomer: () async {
+          await _showCustomerForm(context);
+          if (mounted) await _loadSummary();
+        },
+        onProduct: () => _openPage(context, const AddProductPage()),
+        onInvoices: () => DesignSettings.destination.value = 1,
+        onRefresh: _loadSummary,
       ),
     );
   }
@@ -3555,6 +3951,7 @@ class _CustomersPageState extends State<CustomersPage> {
     super.initState();
     _searchController.addListener(_applySearch);
     _loadCustomers();
+    LiveSync.changes.addListener(_loadCustomers);
   }
 
   @override
@@ -3562,6 +3959,7 @@ class _CustomersPageState extends State<CustomersPage> {
     _searchController
       ..removeListener(_applySearch)
       ..dispose();
+    LiveSync.changes.removeListener(_loadCustomers);
     super.dispose();
   }
 
@@ -4081,12 +4479,16 @@ class BusinessSettings {
     await preferences.remove(key);
   }
 
-  static Future<String> _uploadBusinessMedia(
+  static Future<String?> _uploadBusinessMedia(
     String localPath,
     String type,
     String userId,
   ) async {
-    if (localPath.isEmpty || !File(localPath).existsSync()) return '';
+    // '' clears the stored image; null leaves it unchanged, so a missing local
+    // copy or a failed upload never erases the cloud reference.
+    if (localPath.isEmpty) return '';
+    final bytes = await readLocalFile(localPath);
+    if (bytes == null) return null;
     try {
       final extension = localPath.split('.').last.toLowerCase();
       final safeExtension = ['png', 'jpg', 'jpeg', 'webp'].contains(extension)
@@ -4102,12 +4504,12 @@ class BusinessSettings {
           .from('business-media')
           .uploadBinary(
             objectPath,
-            await File(localPath).readAsBytes(),
+            bytes,
             fileOptions: FileOptions(contentType: contentType, upsert: true),
           );
       return objectPath;
     } catch (_) {
-      return '';
+      return null;
     }
   }
 
@@ -4122,12 +4524,7 @@ class BusinessSettings {
           .from('business-media')
           .download(objectPath);
       final extension = objectPath.split('.').last.toLowerCase();
-      final directory = await getApplicationDocumentsDirectory();
-      final file = File(
-        '${directory.path}${Platform.pathSeparator}business_$type.$extension',
-      );
-      await file.writeAsBytes(bytes, flush: true);
-      return file.path;
+      return await writeAppFile('business_$type.$extension', bytes);
     } catch (_) {
       return fallback;
     }
@@ -4187,16 +4584,25 @@ class BusinessSettings {
     };
   }
 
-  static Future<void> syncFromCloud() async {
+  /// Loads the profile of the business on screen: your own, or the shared
+  /// business being viewed. [clearIfMissing] empties the local copy when that
+  /// business has no saved profile, so another business's details never linger.
+  static Future<void> syncFromCloud({bool clearIfMissing = false}) async {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
+    final viewing = BusinessAccess.viewing.value;
     try {
       final row = await Supabase.instance.client
           .from('business_profiles')
           .select()
-          .eq('user_id', user.id)
+          .eq('user_id', viewing?.ownerId ?? user.id)
           .maybeSingle();
-      if (row == null) return;
+      if (row == null) {
+        if (clearIfMissing || viewing != null) {
+          await _saveLocalProfile({if (viewing != null) 'name': viewing.name});
+        }
+        return;
+      }
       isGstRegistered.value = row['gst_registered'] == true;
       defaultDueDay.value = row['default_due_day'] as int? ?? 7;
       quotationTerms.value = DocumentDefaults.resolve(
@@ -4480,6 +4886,9 @@ class BusinessSettings {
   }
 
   static Future<void> saveProfile(Map<String, String> value) async {
+    if (BusinessAccess.readOnly) {
+      throw StateError(BusinessAccess.readOnlyMessage);
+    }
     await _saveLocalProfile(value);
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
@@ -4512,9 +4921,9 @@ class BusinessSettings {
       'financial_year': value['financialYear'] ?? '',
       'invoice_prefix': value['invoicePrefix'] ?? 'INV',
       'quotation_prefix': value['quotationPrefix'] ?? 'QTN',
-      'logo_object_path': mediaPaths[0],
-      'signature_object_path': mediaPaths[1],
-      'qr_object_path': mediaPaths[2],
+      if (mediaPaths[0] != null) 'logo_object_path': mediaPaths[0],
+      if (mediaPaths[1] != null) 'signature_object_path': mediaPaths[1],
+      if (mediaPaths[2] != null) 'qr_object_path': mediaPaths[2],
       'updated_at': DateTime.now().toUtc().toIso8601String(),
     });
     await Supabase.instance.client.auth.updateUser(
@@ -4754,7 +5163,7 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
   Future<void> _drawSignature() async {
     final path = await showDialog<String>(
       context: context,
-      builder: (_) => const _SignaturePadDialog(),
+      builder: (_) => const SignaturePadDialog(),
     );
     if (path != null && mounted) setState(() => _signaturePath = path);
   }
@@ -4808,12 +5217,10 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
       _isLookingUpIfsc = true;
       _ifscLookupMessage = null;
     });
-    final client = HttpClient();
     try {
-      final request = await client.getUrl(
+      final response = await http.get(
         Uri.parse('https://ifsc.razorpay.com/$ifsc'),
       );
-      final response = await request.close();
       if (response.statusCode == 404) {
         if (mounted) {
           setState(
@@ -4831,9 +5238,7 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
         }
         return;
       }
-      final data =
-          jsonDecode(await response.transform(utf8.decoder).join())
-              as Map<String, dynamic>;
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
       if (!mounted) return;
       setState(() {
         _bankNameController.text = data['BANK']?.toString() ?? '';
@@ -4848,7 +5253,6 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
         );
       }
     } finally {
-      client.close(force: true);
       if (mounted) setState(() => _isLookingUpIfsc = false);
     }
   }
@@ -4871,38 +5275,20 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                const DesignSelector(),
-                const SizedBox(height: 24),
+                Text(
+                  'Appearance',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 12),
                 ValueListenableBuilder<ThemeMode>(
                   valueListenable: BusinessSettings.themeMode,
-                  builder: (context, mode, _) =>
-                      DropdownButtonFormField<ThemeMode>(
-                        initialValue: mode,
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Appearance',
-                        ),
-                        items: const [
-                          DropdownMenuItem(
-                            value: ThemeMode.system,
-                            child: Text('System default'),
-                          ),
-                          DropdownMenuItem(
-                            value: ThemeMode.light,
-                            child: Text('Light'),
-                          ),
-                          DropdownMenuItem(
-                            value: ThemeMode.dark,
-                            child: Text('Dark'),
-                          ),
-                        ],
-                        onChanged: (value) async {
-                          if (value != null) {
-                            await BusinessSettings.setThemeMode(value);
-                          }
-                        },
-                      ),
+                  builder: (context, mode, _) => ThemeModeToggle(
+                    mode: mode,
+                    onChanged: BusinessSettings.setThemeMode,
+                  ),
                 ),
+                const SizedBox(height: 16),
+                const AppLockSetting(),
                 const SizedBox(height: 24),
                 Text(
                   'Invoice colours',
@@ -5464,11 +5850,8 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
             child: Column(
               children: [
                 Expanded(
-                  child: path.isNotEmpty && File(path).existsSync()
-                      ? ColoredBox(
-                          color: Colors.white,
-                          child: Image.file(File(path), fit: BoxFit.contain),
-                        )
+                  child: localFileExists(path)
+                      ? ColoredBox(color: Colors.white, child: localImage(path))
                       : const Icon(Icons.add_photo_alternate_outlined),
                 ),
                 Text(label, overflow: TextOverflow.ellipsis),
@@ -5590,23 +5973,9 @@ class _PaymentsPageState extends State<PaymentsPage> {
       await _load();
     } catch (e) {
       if (_isOfflineError(e)) {
-        final invoiceId = params['p_invoice_id'];
-        await OfflineStore.enqueue('payments', {
-          ...params,
-          '_queue_id': params['p_client_request_id'],
-          '_label': _invoices
-              .where((invoice) => invoice['id'].toString() == invoiceId)
-              .map((invoice) => invoice['invoice_number']?.toString() ?? '')
-              .firstOrNull,
-        });
         if (mounted) {
-          _amountController.clear();
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Payment saved offline and will sync automatically',
-              ),
-            ),
+            const SnackBar(content: Text(_NotSavedOffline.message)),
           );
         }
       } else if (mounted) {
@@ -5926,14 +6295,18 @@ class _ReportsPageState extends State<ReportsPage> {
     required String filename,
     required String mimeType,
   }) async {
-    final path =
-        '${Directory.systemTemp.path}${Platform.pathSeparator}$filename';
-    await File(path).writeAsBytes(bytes, flush: true);
+    final file = kIsWeb
+        ? XFile.fromData(
+            Uint8List.fromList(bytes),
+            name: filename,
+            mimeType: mimeType,
+          )
+        : XFile(await writeTempFile(filename, bytes), mimeType: mimeType);
     await SharePlus.instance.share(
       ShareParams(
         subject: 'Simplek report export',
         text: 'Simplek report for the selected period.',
-        files: [XFile(path, mimeType: mimeType)],
+        files: [file],
       ),
     );
   }
@@ -6641,6 +7014,13 @@ class _QuotationsPageState extends State<QuotationsPage> {
   void initState() {
     super.initState();
     _load();
+    LiveSync.changes.addListener(_load);
+  }
+
+  @override
+  void dispose() {
+    LiveSync.changes.removeListener(_load);
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -7712,6 +8092,7 @@ class _QuotationPreviewPageState extends State<QuotationPreviewPage> {
   Future<Uint8List> _pdf(PdfPageFormat format) async {
     final profile = BusinessSettings.profile.value;
     final paymentQr = await buildPaymentQr(profile);
+    final signature = await loadPdfSignature(profile['signaturePath']);
     final pdf = pw.Document();
     pdf.addPage(
       pw.MultiPage(
@@ -7813,7 +8194,15 @@ class _QuotationPreviewPageState extends State<QuotationPreviewPage> {
             ),
             pw.Text(widget.quotation['terms'].toString()),
           ],
-          if (paymentQr != null) ...[pw.SizedBox(height: 20), paymentQr],
+          pw.SizedBox(height: 24),
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: pw.CrossAxisAlignment.end,
+            children: [
+              paymentQr ?? pw.SizedBox(),
+              pdfSignatureBlock(signature),
+            ],
+          ),
           pw.SizedBox(height: 28),
           pw.Align(
             alignment: pw.Alignment.center,
@@ -7979,6 +8368,13 @@ class _InvoiceHistoryPageState extends State<InvoiceHistoryPage> {
   void initState() {
     super.initState();
     _loadInvoices();
+    LiveSync.changes.addListener(_loadInvoices);
+  }
+
+  @override
+  void dispose() {
+    LiveSync.changes.removeListener(_loadInvoices);
+    super.dispose();
   }
 
   Future<void> _loadInvoices() async {
@@ -8518,23 +8914,13 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
       saved = true;
       savedNumber = invoiceNumber;
     } catch (e) {
-      if (_isOfflineError(e) &&
-          !_isEditing &&
-          _numberController.text.trim().isEmpty) {
-        await OfflineStore.enqueue('invoice_drafts', {
-          'header': {..._invoiceHeaderPayload(), 'id': _newInvoiceId},
-          'items': _invoiceItemsPayload(),
-          'number_params': {
-            'p_prefix':
-                BusinessSettings.profile.value['invoicePrefix'] ?? 'INV',
-          },
-        });
-        saved = true;
+      if (_isOfflineError(e)) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
-                'Invoice saved offline; it will be finalized when synced',
+                'No internet connection. The invoice is not saved yet. '
+                'Keep this screen open, connect, and save again.',
               ),
             ),
           );
@@ -9301,15 +9687,15 @@ class InvoicePdfRenderer {
       ? '-'
       : '${value.day.toString().padLeft(2, '0')}/${value.month.toString().padLeft(2, '0')}/${value.year}';
   Future<pw.MemoryImage?> _image(String? path) async {
-    if (path == null || path.isEmpty || !await File(path).exists()) return null;
-    return pw.MemoryImage(await File(path).readAsBytes());
+    final bytes = await readLocalFile(path);
+    return bytes == null ? null : pw.MemoryImage(bytes);
   }
 
   Future<Uint8List> build(PdfPageFormat format) async {
     final profile = _profile;
     final palette = InvoicePalette.resolve(profile['invoiceTheme']);
     final logo = await _image(profile['logoPath']);
-    final signature = await _image(profile['signaturePath']);
+    final signature = await loadPdfSignature(profile['signaturePath']);
     final qr = await buildPaymentQr(profile);
     final pdf = pw.Document();
     pdf.addPage(
@@ -9463,22 +9849,7 @@ class InvoicePdfRenderer {
           pw.Row(
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
             crossAxisAlignment: pw.CrossAxisAlignment.end,
-            children: [
-              qr ?? pw.SizedBox(),
-              pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.center,
-                children: [
-                  if (signature != null)
-                    pw.Container(
-                      width: 110,
-                      height: 45,
-                      child: pw.Image(signature, fit: pw.BoxFit.contain),
-                    ),
-                  pw.SizedBox(height: 4),
-                  pw.Text('Authorised signatory'),
-                ],
-              ),
-            ],
+            children: [qr ?? pw.SizedBox(), pdfSignatureBlock(signature)],
           ),
         ],
         footer: (_) => pw.Align(
@@ -9648,7 +10019,7 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
         }
       } else {
         final uri = whatsappChatUri(phone, _message);
-        if (Platform.isAndroid) {
+        if (isAndroidDevice) {
           await const MethodChannel(
             'simplek/document_share',
           ).invokeMethod('openChat', {'url': uri.toString()});
@@ -9735,6 +10106,7 @@ class _ProductsPageState extends State<ProductsPage> {
     super.initState();
     _searchController.addListener(_applySearch);
     _loadProducts();
+    LiveSync.changes.addListener(_loadProducts);
   }
 
   @override
@@ -9742,6 +10114,7 @@ class _ProductsPageState extends State<ProductsPage> {
     _searchController
       ..removeListener(_applySearch)
       ..dispose();
+    LiveSync.changes.removeListener(_loadProducts);
     super.dispose();
   }
 
@@ -10150,7 +10523,6 @@ class _AddProductPageState extends State<AddProductPage> {
           'cess_rate': null,
         },
       };
-      var queuedOffline = false;
       try {
         if (_isEditing) {
           await Supabase.instance.client
@@ -10163,12 +10535,7 @@ class _AddProductPageState extends State<AddProductPage> {
       } catch (error) {
         if (error is PostgrestException || error is AuthException) rethrow;
         if (_isEditing) rethrow;
-        await OfflineStore.enqueue('products', product);
-        await OfflineStore.addCached('products', {
-          ...product,
-          'is_active': true,
-        });
-        queuedOffline = true;
+        throw const _NotSavedOffline();
       }
       if (!mounted) return;
       Navigator.of(context).pop(
@@ -10180,9 +10547,7 @@ class _AddProductPageState extends State<AddProductPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            queuedOffline
-                ? '${_isProduct ? 'Product' : 'Service'} saved offline and will sync automatically'
-                : '${_isProduct ? 'Product' : 'Service'} saved successfully',
+            '${_isProduct ? 'Product' : 'Service'} saved successfully',
           ),
         ),
       );
@@ -10637,8 +11002,7 @@ class _CustomerFormDialogState extends State<_CustomerFormDialog> {
       } catch (error) {
         if (error is PostgrestException || error is AuthException) rethrow;
         if (_isEditing) rethrow;
-        await OfflineStore.enqueue('customers', customer);
-        await OfflineStore.addCached('customers', customer);
+        throw const _NotSavedOffline();
       }
 
       if (mounted) {

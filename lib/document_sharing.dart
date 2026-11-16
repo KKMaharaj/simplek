@@ -1,6 +1,7 @@
-import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:printing/printing.dart';
+
+import 'platform/local_files.dart';
 
 String documentPdfFilename(String kind, String number) =>
     '${kind}_${number.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_')}.pdf';
@@ -16,7 +17,7 @@ Future<void> sharePdfAttachment({
   bool? android,
 }) async {
   final filename = documentPdfFilename(kind, number);
-  if (android ?? Platform.isAndroid) {
+  if (android ?? isAndroidDevice) {
     await const MethodChannel('simplek/document_share').invokeMethod('share', {
       'bytes': bytes,
       'filename': filename,

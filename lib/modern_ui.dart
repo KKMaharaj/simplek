@@ -1,186 +1,16 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
+import 'app_theme.dart';
+
+export 'app_theme.dart';
+
+/// Which section of the app shell is showing.
 class DesignSettings {
-  static final modern = ValueNotifier(true);
   static final destination = ValueNotifier(0);
-  static Future<void> load() async {
-    modern.value =
-        (await SharedPreferences.getInstance()).getBool('modern_design') ??
-        true;
-  }
 
-  static Future<void> setModern(bool value) async {
-    await (await SharedPreferences.getInstance()).setBool(
-      'modern_design',
-      value,
-    );
-    destination.value = 0;
-    modern.value = value;
-  }
-}
-
-ThemeData simplekTheme(Brightness brightness) {
-  final dark = brightness == Brightness.dark;
-  final background = Color(dark ? 0xFF0B0F19 : 0xFFF8FAFC);
-  final surface = Color(dark ? 0xFF161F30 : 0xFFFFFFFF);
-  final primary = Color(dark ? 0xFF60A5FA : 0xFF1E3A8A);
-  final text = Color(dark ? 0xFFF8FAFC : 0xFF0F172A);
-  final muted = Color(dark ? 0xFF94A3B8 : 0xFF64748B);
-  final border = Color(dark ? 0xFF283548 : 0xFFE2E8F0);
-  final scheme =
-      ColorScheme.fromSeed(seedColor: primary, brightness: brightness).copyWith(
-        primary: primary,
-        onPrimary: dark ? const Color(0xFF0B0F19) : Colors.white,
-        surface: surface,
-        onSurface: text,
-        onSurfaceVariant: muted,
-        outlineVariant: border,
-      );
-  final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(12));
-  final base = ThemeData(useMaterial3: true, colorScheme: scheme);
-  return base.copyWith(
-    scaffoldBackgroundColor: background,
-    textTheme: base.textTheme
-        .apply(bodyColor: text, displayColor: text)
-        .copyWith(
-          headlineMedium: base.textTheme.headlineMedium!.copyWith(
-            fontSize: 28,
-            fontWeight: FontWeight.w700,
-            color: text,
-            letterSpacing: -0.6,
-          ),
-          titleLarge: base.textTheme.titleLarge!.copyWith(
-            fontSize: 21,
-            fontWeight: FontWeight.w700,
-            color: text,
-          ),
-          titleMedium: base.textTheme.titleMedium!.copyWith(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-            color: text,
-          ),
-        ),
-    appBarTheme: AppBarTheme(
-      backgroundColor: background,
-      foregroundColor: text,
-      surfaceTintColor: Colors.transparent,
-      centerTitle: false,
-      elevation: 0,
-      titleTextStyle: base.textTheme.titleLarge!.copyWith(
-        color: text,
-        fontSize: 21,
-        fontWeight: FontWeight.w700,
-      ),
-    ),
-    inputDecorationTheme: InputDecorationTheme(
-      filled: true,
-      fillColor: surface,
-      contentPadding: const EdgeInsets.all(16),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: border),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: primary, width: 2),
-      ),
-      helperMaxLines: 3,
-      errorMaxLines: 3,
-    ),
-    cardTheme: CardThemeData(
-      color: surface,
-      elevation: 0,
-      margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: border),
-      ),
-    ),
-    filledButtonTheme: FilledButtonThemeData(
-      style: FilledButton.styleFrom(
-        minimumSize: const Size(48, 52),
-        shape: shape,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      ),
-    ),
-    outlinedButtonTheme: OutlinedButtonThemeData(
-      style: OutlinedButton.styleFrom(
-        minimumSize: const Size(48, 52),
-        shape: shape,
-        side: BorderSide(color: border),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      ),
-    ),
-    textButtonTheme: TextButtonThemeData(
-      style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-    ),
-    iconButtonTheme: IconButtonThemeData(
-      style: IconButton.styleFrom(minimumSize: const Size(48, 48)),
-    ),
-    navigationBarTheme: NavigationBarThemeData(
-      backgroundColor: surface,
-      indicatorColor: primary.withValues(alpha: 0.12),
-    ),
-    dividerTheme: DividerThemeData(color: border, thickness: 1),
-    dialogTheme: DialogThemeData(
-      backgroundColor: surface,
-      surfaceTintColor: Colors.transparent,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-    ),
-    bottomSheetTheme: BottomSheetThemeData(
-      backgroundColor: surface,
-      showDragHandle: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-    ),
-    snackBarTheme: SnackBarThemeData(
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-    ),
-    floatingActionButtonTheme: FloatingActionButtonThemeData(
-      backgroundColor: primary,
-      foregroundColor: scheme.onPrimary,
-      elevation: 2,
-      shape: shape,
-    ),
-  );
-}
-
-class DesignSelector extends StatelessWidget {
-  const DesignSelector({super.key});
-  @override
-  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
-    valueListenable: DesignSettings.modern,
-    builder: (context, modern, _) => Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        DropdownButtonFormField<bool>(
-          key: ValueKey(modern),
-          initialValue: modern,
-          isExpanded: true,
-          decoration: const InputDecoration(labelText: 'App design'),
-          items: const [
-            DropdownMenuItem(value: true, child: Text('Modern')),
-            DropdownMenuItem(
-              value: false,
-              child: Text('Classic — previous design'),
-            ),
-          ],
-          onChanged: (value) async {
-            if (value != null) await DesignSettings.setModern(value);
-          },
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Switch back to Classic anytime. Your records and settings stay unchanged.',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-      ],
-    ),
-  );
+  /// Always true. The old "Classic" design was removed; a few document
+  /// screens still branch on this until those branches are deleted.
+  static final modern = ValueNotifier(true);
 }
 
 class EditorSection extends StatelessWidget {
@@ -364,6 +194,8 @@ class InvoiceStatusBadge extends StatelessWidget {
     final dark = Theme.of(context).brightness == Brightness.dark;
     final color = switch (status.toLowerCase()) {
       'paid' => Color(dark ? 0xFF34D399 : 0xFF047857),
+      'partial' => Color(dark ? 0xFF8EA2FF : 0xFF2A3FD6),
+      'draft' || 'cancelled' => Color(dark ? 0xFF9AA3C0 : 0xFF667091),
       'overdue' => Color(dark ? 0xFFF87171 : 0xFFB91C1C),
       _ => Color(dark ? 0xFFFBBF24 : 0xFF92400E),
     };
@@ -371,13 +203,15 @@ class InvoiceStatusBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
-        status.toUpperCase(),
+        status.isEmpty
+            ? ''
+            : status[0].toUpperCase() + status.substring(1).toLowerCase(),
         style: TextStyle(
           color: color,
-          fontSize: 11,
+          fontSize: 11.5,
           fontWeight: FontWeight.w700,
         ),
       ),
@@ -518,6 +352,7 @@ class SearchableStateField extends StatelessWidget {
   }
 }
 
+/// The home screen: money owed up front, then shortcuts and recent invoices.
 class ModernOverview extends StatelessWidget {
   const ModernOverview({
     super.key,
@@ -526,6 +361,8 @@ class ModernOverview extends StatelessWidget {
     required this.invoiceCount,
     required this.customerCount,
     this.productCount,
+    this.businessName = '',
+    this.readOnly = false,
     required this.loading,
     required this.error,
     required this.recent,
@@ -536,9 +373,12 @@ class ModernOverview extends StatelessWidget {
     required this.onInvoices,
     required this.onRefresh,
   });
-  final String sales, outstanding, invoiceCount, customerCount;
+  final String sales, outstanding, invoiceCount, customerCount, businessName;
   final String? productCount;
   final bool loading;
+
+  /// Hides everything that creates records (view-only accountant access).
+  final bool readOnly;
   final String? error;
   final List<Map<String, String>> recent;
   final VoidCallback onNewInvoice,
@@ -547,222 +387,493 @@ class ModernOverview extends StatelessWidget {
       onProduct,
       onInvoices;
   final Future<void> Function() onRefresh;
+
+  static String _greeting() {
+    final hour = DateTime.now().hour;
+    return hour < 12
+        ? 'Good morning'
+        : hour < 17
+        ? 'Good afternoon'
+        : 'Good evening';
+  }
+
   @override
-  Widget build(BuildContext context) => RefreshIndicator(
-    onRefresh: onRefresh,
-    child: ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
-      children: [
-        const EditorSection(
-          'Business overview',
-          'Your sales, customers and next steps.',
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final blank = loading && recent.isEmpty;
+    return RefreshIndicator(
+      onRefresh: onRefresh,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 104),
+        children: [
+          Text(_greeting(), style: TextStyle(color: muted, fontSize: 14)),
+          const SizedBox(height: 2),
+          Text(
+            businessName.isEmpty ? 'Your business today' : businessName,
+            style: theme.textTheme.headlineSmall,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 16),
+          if (error != null) ...[
+            Card(
+              child: ListTile(
+                leading: const TintedIcon(
+                  Icons.cloud_off_outlined,
+                  color: SimplekColors.warning,
+                ),
+                title: const Text('Could not refresh'),
+                subtitle: const Text('Totals below may be out of date.'),
+                trailing: TextButton(
+                  onPressed: onRefresh,
+                  child: const Text('Retry'),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          _HeroCard(
+            outstanding: blank ? '—' : outstanding,
+            sales: blank ? '—' : sales,
+            invoiceCount: blank ? '—' : invoiceCount,
+            loading: loading,
+            onNewInvoice: readOnly ? null : onNewInvoice,
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _StatTile(
+                  icon: Icons.people_alt_outlined,
+                  color: SimplekColors.violet,
+                  label: 'Customers',
+                  value: blank ? '—' : customerCount,
+                ),
+              ),
+              if (productCount != null) ...[
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _StatTile(
+                    icon: Icons.inventory_2_outlined,
+                    color: SimplekColors.success,
+                    label: 'Items',
+                    value: blank ? '—' : productCount!,
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 26),
+          if (!readOnly) ...[
+            Text('Quick actions', style: theme.textTheme.titleLarge),
+            const SizedBox(height: 12),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final columns = constraints.maxWidth >= 560 ? 4 : 2;
+                final width =
+                    (constraints.maxWidth - (columns - 1) * 12) / columns;
+                return Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    for (final action in [
+                      (
+                        Icons.receipt_long_outlined,
+                        'Invoice',
+                        SimplekColors.brand,
+                        onNewInvoice,
+                      ),
+                      (
+                        Icons.description_outlined,
+                        'Quotation',
+                        SimplekColors.violet,
+                        onNewQuotation,
+                      ),
+                      (
+                        Icons.person_add_alt_outlined,
+                        'Customer',
+                        SimplekColors.warning,
+                        onCustomer,
+                      ),
+                      (
+                        Icons.add_box_outlined,
+                        'Product / Service',
+                        SimplekColors.success,
+                        onProduct,
+                      ),
+                    ])
+                      SizedBox(
+                        width: width,
+                        child: _ActionTile(
+                          icon: action.$1,
+                          label: action.$2,
+                          color: action.$3,
+                          onTap: action.$4,
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 26),
+          ],
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Recent invoices',
+                  style: theme.textTheme.titleLarge,
+                ),
+              ),
+              TextButton(onPressed: onInvoices, child: const Text('View all')),
+            ],
+          ),
+          const SizedBox(height: 6),
+          if (recent.isEmpty && !loading)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  children: [
+                    const TintedIcon(Icons.receipt_long_outlined, size: 56),
+                    const SizedBox(height: 14),
+                    Text(
+                      error == null
+                          ? 'Ready for your first invoice?'
+                          : 'Invoices are unavailable',
+                      style: theme.textTheme.titleMedium,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'It takes under a minute, and you can share it right away.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: muted),
+                    ),
+                    if (!readOnly) ...[
+                      const SizedBox(height: 16),
+                      FilledButton(
+                        onPressed: onNewInvoice,
+                        child: const Text('Create invoice'),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          if (recent.isNotEmpty)
+            Card(
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                children: [
+                  for (final (index, row) in recent.indexed) ...[
+                    if (index > 0) const Divider(indent: 72),
+                    _RecentInvoiceRow(row: row, onTap: onInvoices),
+                  ],
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroCard extends StatelessWidget {
+  const _HeroCard({
+    required this.outstanding,
+    required this.sales,
+    required this.invoiceCount,
+    required this.loading,
+    required this.onNewInvoice,
+  });
+  final String outstanding, sales, invoiceCount;
+  final bool loading;
+  final VoidCallback? onNewInvoice;
+
+  @override
+  Widget build(BuildContext context) {
+    const soft = Color(0xCCFFFFFF);
+    return Container(
+      decoration: BoxDecoration(
+        gradient: SimplekColors.heroGradient,
+        borderRadius: BorderRadius.circular(26),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x553B5BFD),
+            blurRadius: 24,
+            offset: Offset(0, 12),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          const Positioned(
+            right: -40,
+            top: -50,
+            child: _Glow(size: 170, alpha: 0.12),
+          ),
+          const Positioned(
+            right: 40,
+            bottom: -70,
+            child: _Glow(size: 150, alpha: 0.08),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(22),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'To collect',
+                  style: TextStyle(color: soft, fontSize: 14),
+                ),
+                const SizedBox(height: 4),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    outstanding,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 36,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -1,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                if (loading)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 12),
+                    child: LinearProgressIndicator(
+                      minHeight: 3,
+                      color: Colors.white,
+                      backgroundColor: Color(0x33FFFFFF),
+                    ),
+                  ),
+                Wrap(
+                  spacing: 24,
+                  runSpacing: 12,
+                  crossAxisAlignment: WrapCrossAlignment.end,
+                  children: [
+                    _HeroFigure(label: 'Total sales', value: sales),
+                    _HeroFigure(label: 'Invoices', value: invoiceCount),
+                  ],
+                ),
+                if (onNewInvoice != null) const SizedBox(height: 18),
+                if (onNewInvoice != null)
+                  FilledButton.icon(
+                    onPressed: onNewInvoice,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: SimplekColors.brandDeep,
+                      minimumSize: const Size(48, 48),
+                    ),
+                    icon: const Icon(Icons.add, size: 20),
+                    label: const Text('New invoice'),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Glow extends StatelessWidget {
+  const _Glow({required this.size, required this.alpha});
+  final double size, alpha;
+  @override
+  Widget build(BuildContext context) => Container(
+    width: size,
+    height: size,
+    decoration: BoxDecoration(
+      shape: BoxShape.circle,
+      color: Colors.white.withValues(alpha: alpha),
+    ),
+  );
+}
+
+class _HeroFigure extends StatelessWidget {
+  const _HeroFigure({required this.label, required this.value});
+  final String label, value;
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Text(
+        label,
+        style: const TextStyle(color: Color(0xCCFFFFFF), fontSize: 12.5),
+      ),
+      const SizedBox(height: 2),
+      Text(
+        value,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 17,
+          fontWeight: FontWeight.w700,
         ),
-        if (error != null)
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
+      ),
+    ],
+  );
+}
+
+class _StatTile extends StatelessWidget {
+  const _StatTile({
+    required this.icon,
+    required this.color,
+    required this.label,
+    required this.value,
+  });
+  final IconData icon;
+  final Color color;
+  final String label, value;
+  @override
+  Widget build(BuildContext context) => Card(
+    child: Padding(
+      padding: const EdgeInsets.all(14),
+      child: Row(
+        children: [
+          TintedIcon(icon, color: color, size: 42),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _ActionTile extends StatelessWidget {
+  const _ActionTile({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) => Card(
+    clipBehavior: Clip.antiAlias,
+    child: InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                TintedIcon(icon, color: color, size: 42),
+                const Spacer(),
+                Icon(
+                  Icons.add_circle,
+                  color: color.withValues(alpha: 0.9),
+                  size: 22,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              label,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _RecentInvoiceRow extends StatelessWidget {
+  const _RecentInvoiceRow({required this.row, required this.onTap});
+  final Map<String, String> row;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final customer = row['customer'] ?? '';
+    final initial = customer.trim().isEmpty
+        ? '#'
+        : customer.trim()[0].toUpperCase();
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 22,
+              backgroundColor: theme.colorScheme.primaryContainer,
+              foregroundColor: theme.colorScheme.onPrimaryContainer,
+              child: Text(
+                initial,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Could not refresh your overview. Previous totals may be out of date.',
-                  ),
-                  TextButton.icon(
-                    onPressed: onRefresh,
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Try again'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        if (loading) const LinearProgressIndicator(),
-        const SizedBox(height: 12),
-        LayoutBuilder(
-          builder: (context, c) {
-            final columns = c.maxWidth >= 720
-                ? 4
-                : (c.maxWidth < 340 ||
-                          MediaQuery.textScalerOf(context).scale(14) > 20
-                      ? 1
-                      : 2);
-            final width = (c.maxWidth - (columns - 1) * 12) / columns;
-            Widget metric(
-              String label,
-              String value,
-              IconData icon,
-              bool prominent,
-            ) => SizedBox(
-              width: width,
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(18),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(icon, color: Theme.of(context).colorScheme.primary),
-                      const SizedBox(height: 18),
-                      Text(
-                        label,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        loading && recent.isEmpty ? '—' : value,
-                        style: TextStyle(
-                          fontSize: prominent ? 24 : 22,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-            return Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                metric('Total sales', sales, Icons.trending_up, true),
-                metric(
-                  'Outstanding',
-                  outstanding,
-                  Icons.account_balance_wallet_outlined,
-                  true,
-                ),
-                metric(
-                  'Invoices',
-                  invoiceCount,
-                  Icons.receipt_long_outlined,
-                  false,
-                ),
-                metric('Customers', customerCount, Icons.people_outline, false),
-                if (productCount != null)
-                  metric(
-                    'Products & services',
-                    productCount!,
-                    Icons.inventory_2_outlined,
-                    false,
-                  ),
-              ],
-            );
-          },
-        ),
-        const SizedBox(height: 24),
-        Text('Quick actions', style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            FilledButton.icon(
-              onPressed: onNewInvoice,
-              icon: const Icon(Icons.add),
-              label: const Text('New invoice'),
-            ),
-            OutlinedButton.icon(
-              onPressed: onNewQuotation,
-              icon: const Icon(Icons.description_outlined),
-              label: const Text('Quotation'),
-            ),
-            OutlinedButton.icon(
-              onPressed: onCustomer,
-              icon: const Icon(Icons.person_add_alt),
-              label: const Text('Customer'),
-            ),
-            OutlinedButton.icon(
-              onPressed: onProduct,
-              icon: const Icon(Icons.inventory_2_outlined),
-              label: const Text('Product / Service'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 28),
-        Wrap(
-          alignment: WrapAlignment.spaceBetween,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            Text(
-              'Recent invoices',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            TextButton(onPressed: onInvoices, child: const Text('View all')),
-          ],
-        ),
-        const SizedBox(height: 8),
-        if (recent.isEmpty && !loading)
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                children: [
-                  const Icon(Icons.receipt_long_outlined, size: 40),
-                  const SizedBox(height: 12),
                   Text(
-                    error == null
-                        ? 'Ready for your first invoice?'
-                        : 'Invoices are unavailable',
-                    style: Theme.of(context).textTheme.titleMedium,
+                    customer.isEmpty ? 'Customer' : customer,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleMedium,
                   ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Create an invoice, or view your saved invoices.',
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 16),
-                  FilledButton(
-                    onPressed: onNewInvoice,
-                    child: const Text('Create invoice'),
+                  const SizedBox(height: 2),
+                  Text(
+                    [
+                      row['number'] ?? '',
+                      row['date'] ?? '',
+                    ].where((part) => part.isNotEmpty).join('  •  '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall,
                   ),
                 ],
               ),
             ),
-          ),
-        ...recent.map(
-          (row) => Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Card(
-              child: InkWell(
-                borderRadius: BorderRadius.circular(16),
-                onTap: onInvoices,
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        row['number'] ?? '',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(row['customer'] ?? ''),
-                      const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 14,
-                        runSpacing: 8,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          Text(
-                            row['amount'] ?? '',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          InvoiceStatusBadge(row['status'] ?? 'draft'),
-                          Text(
-                            row['date'] ?? '',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+            const SizedBox(width: 10),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(row['amount'] ?? '', style: theme.textTheme.titleMedium),
+                const SizedBox(height: 4),
+                InvoiceStatusBadge(row['status'] ?? 'draft'),
+              ],
             ),
-          ),
+          ],
         ),
-      ],
-    ),
-  );
+      ),
+    );
+  }
 }
