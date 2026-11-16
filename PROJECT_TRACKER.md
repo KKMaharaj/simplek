@@ -252,3 +252,14 @@ applied to the live project by 2026-09-04.
   to 30 invoices a month; ₹250 a month or ₹1,500 a year). AI invoice creation
   is marked "Coming soon". **The 30-invoice limit and payments are not
   implemented**: today every account is unlimited and free.
+
+## November 16 website and web app online
+
+- Live on Cloudflare Pages (project `simplek`, account
+  akshaykk.personal@gmail.com): website https://simplek.pages.dev, web app
+  https://simplek.pages.dev/app/. Deployed by direct upload of
+  `build/simplek-site.zip`; `tool/build_site.sh` now also builds that zip.
+  To update the site, rebuild and upload a new deployment to the same project.
+- `https://simplek.pages.dev/app/` added to Supabase Auth Redirect URLs. Site
+  URL stays `simplek://login-callback/` for the phone app.
+- Not yet tried: signing up or logging in on the live web app.
