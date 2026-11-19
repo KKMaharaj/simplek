@@ -3,353 +3,439 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Simplek — Invoicing made easy</title>
-  <meta name="description" content="Simplek is GST billing for Indian small businesses: invoices, quotations, payments and reports, on your phone and on the web.">
-  <meta name="theme-color" content="#3B5BFD">
+  <title>Simplek: GST invoicing made simple</title>
+  <meta name="description" content="Create GST invoices in a minute, share them on WhatsApp and get paid. Free for 30 invoices a month. Android app and web.">
+  <meta name="theme-color" content="#0B1A33">
   <link rel="icon" type="image/png" href="icon.png">
+  <link rel="preload" href="fonts/inter-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/fraunces-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
   <style>
+    @font-face { font-family: "Inter"; font-weight: 400; font-style: normal; font-display: swap; src: url("fonts/inter-latin-400-normal.woff2") format("woff2"); }
+    @font-face { font-family: "Inter"; font-weight: 500; font-style: normal; font-display: swap; src: url("fonts/inter-latin-500-normal.woff2") format("woff2"); }
+    @font-face { font-family: "Inter"; font-weight: 600; font-style: normal; font-display: swap; src: url("fonts/inter-latin-600-normal.woff2") format("woff2"); }
+    @font-face { font-family: "Fraunces"; font-weight: 500; font-style: normal; font-display: swap; src: url("fonts/fraunces-latin-500-normal.woff2") format("woff2"); }
+    @font-face { font-family: "Fraunces"; font-weight: 600; font-style: normal; font-display: swap; src: url("fonts/fraunces-latin-600-normal.woff2") format("woff2"); }
+    @font-face { font-family: "Noto Sans Kannada"; font-weight: 600; font-style: normal; font-display: swap; unicode-range: U+0C80-0CFF, U+200C-200D, U+25CC; src: url("fonts/noto-sans-kannada-kannada-600-normal.woff2") format("woff2"); }
+
     :root {
-      --bg: #F3F5FB; --surface: #FFFFFF; --ink: #0E1630; --muted: #667091;
-      --line: #E2E6F1; --brand: #3B5BFD; --brand-deep: #2A3FD6; --violet: #6A4DF4;
-      --tint: #E7ECFF; --green: #0FA968; --amber: #E38A0B;
-      --shadow: 0 10px 30px rgba(27, 37, 89, .08);
-    }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #0B1020; --surface: #151B2E; --ink: #EEF1FB; --muted: #9AA3C0;
-        --line: #262F4A; --brand: #8EA2FF; --brand-deep: #B4C1FF; --tint: #243063;
-        --shadow: none;
-      }
+      --navy: #0B1A33; --navy-2: #12306B;
+      --orange: #F26B1D; --orange-text: #C2410C;
+      --sky: #7CCBFF; --sky-tint: #E8F5FF; --sky-line: #BFE6FF; --sky-text: #1D6FA3;
+      --white: #FFFFFF; --mist: #F7F9FC; --slate: #475569; --line: #E2E8F0;
+      --serif: "Fraunces", Georgia, "Times New Roman", serif;
+      --sans: "Inter", "Segoe UI", Roboto, system-ui, -apple-system, Arial, sans-serif;
     }
     * { box-sizing: border-box; margin: 0; }
-    html { scroll-behavior: smooth; }
-    body {
-      font-family: "Segoe UI", Roboto, system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
-      background: var(--bg); color: var(--ink); line-height: 1.55;
-      -webkit-font-smoothing: antialiased;
-    }
+    html { scroll-behavior: smooth; scroll-padding-top: 72px; }
+    body { font-family: var(--sans); font-size: 16px; line-height: 1.6; color: var(--navy); background: var(--white); -webkit-font-smoothing: antialiased; }
+    img { max-width: 100%; height: auto; display: block; }
     a { color: inherit; text-decoration: none; }
-    .wrap { max-width: 1120px; margin: 0 auto; padding: 0 20px; }
+    .wrap { max-width: 1160px; margin: 0 auto; padding: 0 20px; }
+    h1, h2, h3 { font-family: var(--serif); font-weight: 600; letter-spacing: -0.01em; line-height: 1.15; }
+    h2 { font-size: clamp(28px, 3.4vw, 40px); }
+    .lead { font-size: 18px; color: var(--slate); max-width: 640px; }
+    .accent { color: var(--orange-text); }
+    section { padding: 88px 0; }
+    .section-head { max-width: 720px; margin-bottom: 40px; }
+    .section-head p { margin-top: 12px; }
 
-    header { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(12px); }
-    nav { display: flex; align-items: center; gap: 12px; height: 68px; }
-    .logo { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 21px; letter-spacing: -.5px; margin-right: auto; }
-    .logo img { width: 36px; height: 36px; border-radius: 10px; }
-    .links { display: flex; gap: 26px; margin-right: 14px; color: var(--muted); font-weight: 500; font-size: 15px; }
-    .links a:hover { color: var(--ink); }
-    .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 46px; padding: 0 22px; border-radius: 999px; font-weight: 600; font-size: 15px; border: 1.5px solid transparent; white-space: nowrap; transition: transform .15s ease, box-shadow .15s ease; }
-    .btn:hover { transform: translateY(-1px); }
-    .btn-primary { background: linear-gradient(135deg, #3B5BFD, #6A4DF4); color: #fff; box-shadow: 0 8px 20px rgba(59, 91, 253, .32); }
-    .btn-ghost { border-color: var(--line); background: var(--surface); }
-    .btn-lg { min-height: 54px; padding: 0 28px; font-size: 16px; }
+    /* Buttons */
+    .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 0 24px; border-radius: 10px; font-weight: 600; font-size: 16px; border: 1.5px solid transparent; white-space: nowrap; transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
+    .btn-primary { background: var(--orange); color: var(--navy); }
+    .btn-primary:hover { background: #E45F12; }
+    .btn-outline { border-color: rgba(255, 255, 255, .55); color: var(--white); }
+    .btn-outline:hover { border-color: var(--white); background: rgba(255, 255, 255, .06); }
+    .btn-outline-dark { border-color: var(--navy); color: var(--navy); }
+    .btn-outline-dark:hover { background: var(--mist); }
+    .btn:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px solid var(--sky); outline-offset: 3px; }
 
-    .hero { display: grid; grid-template-columns: 1.05fr .95fr; gap: 48px; align-items: center; padding: 56px 0 72px; }
-    .pill { display: inline-block; background: var(--tint); color: var(--brand-deep); font-weight: 600; font-size: 13.5px; padding: 6px 14px; border-radius: 999px; }
-    h1 { font-size: clamp(36px, 5.4vw, 58px); line-height: 1.06; letter-spacing: -1.8px; font-weight: 800; margin: 18px 0 18px; }
-    h1 span { background: linear-gradient(135deg, #3B5BFD, #7A4DF6); -webkit-background-clip: text; background-clip: text; color: transparent; }
-    .lead { font-size: 18px; color: var(--muted); max-width: 520px; }
-    .cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
-    .note { margin-top: 16px; font-size: 14px; color: var(--muted); }
+    /* Header */
+    header { position: sticky; top: 0; z-index: 20; background: var(--navy); color: var(--white); border-bottom: 1px solid transparent; transition: background-color .2s ease, color .2s ease, border-color .2s ease; }
+    header.scrolled { background: var(--white); color: var(--navy); border-bottom-color: var(--line); }
+    nav { display: flex; align-items: center; gap: 22px; height: 68px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-family: var(--serif); font-weight: 600; font-size: 22px; margin-right: auto; }
+    .brand img { width: 34px; height: 34px; border-radius: 8px; }
+    .menu { display: flex; gap: 24px; font-size: 15px; font-weight: 500; opacity: .9; }
+    .menu a:hover { color: var(--orange); }
+    header.scrolled .menu a:hover { color: var(--orange-text); }
+    .login { font-weight: 600; font-size: 15px; padding: 10px 4px; }
+    nav .btn { min-height: 44px; padding: 0 18px; font-size: 15px; }
 
-    /* Phone preview drawn in CSS, mirroring the app's home screen. */
-    .phone { justify-self: center; width: min(340px, 100%); background: var(--bg); border: 10px solid #0E1630; border-radius: 44px; padding: 20px 16px 22px; box-shadow: 0 30px 60px rgba(27, 37, 89, .22); }
-    .phone small { color: var(--muted); font-size: 12.5px; }
-    .phone h4 { font-size: 20px; letter-spacing: -.4px; margin-bottom: 12px; }
-    .card-hero { background: linear-gradient(135deg, #3B5BFD, #6A4DF4); color: #fff; border-radius: 24px; padding: 18px; position: relative; overflow: hidden; }
-    .card-hero::after { content: ""; position: absolute; right: -40px; top: -50px; width: 150px; height: 150px; border-radius: 50%; background: rgba(255, 255, 255, .13); }
-    .card-hero .amount { font-size: 31px; font-weight: 800; letter-spacing: -1px; }
-    .card-hero .row { display: flex; gap: 22px; margin-top: 12px; font-size: 12px; opacity: .92; }
-    .card-hero .row b { display: block; font-size: 15px; }
-    .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
-    .tile { background: var(--surface); border-radius: 18px; padding: 12px; box-shadow: var(--shadow); border: 1px solid var(--line); font-weight: 600; font-size: 14px; }
-    .dot { width: 36px; height: 36px; border-radius: 12px; margin-bottom: 10px; }
-    .list { background: var(--surface); border-radius: 18px; margin-top: 12px; border: 1px solid var(--line); }
-    .list div { display: flex; align-items: center; gap: 10px; padding: 11px 12px; font-size: 13.5px; }
-    .list div + div { border-top: 1px solid var(--line); }
-    .list i { width: 34px; height: 34px; border-radius: 50%; background: var(--tint); color: var(--brand-deep); display: grid; place-items: center; font-style: normal; font-weight: 700; }
-    .list span { margin-left: auto; font-weight: 700; }
-    .badge { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; }
-    .paid { background: rgba(15, 169, 104, .14); color: var(--green); }
-    .due { background: rgba(227, 138, 11, .15); color: var(--amber); }
+    /* Hero */
+    .hero { background: var(--navy); color: var(--white); padding: 72px 0 96px; overflow: hidden; }
+    .hero-grid { display: grid; grid-template-columns: 1.05fr .95fr; gap: 56px; align-items: center; }
+    .eyebrow { color: var(--sky); font-weight: 600; font-size: 14px; letter-spacing: .08em; text-transform: uppercase; }
+    .hero h1 { font-size: clamp(36px, 5.2vw, 58px); margin: 16px 0 20px; }
+    .hero h1 .second { display: block; color: var(--orange); }
+    .hero .lead { color: #C9D6EA; }
+    .cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
+    .assurance { margin-top: 18px; font-size: 14.5px; color: #A9BBD6; }
+    .assurance span { white-space: nowrap; }
+    .hero-grid > * { min-width: 0; }
+    .showcase { position: relative; padding: 0 0 28px 24%; max-width: 480px; justify-self: end; width: 100%; }
+    .invoice-card { background: var(--white); border-radius: 8px; border: 1px solid #1D3B6E; box-shadow: 0 18px 40px rgba(0, 0, 0, .28); overflow: hidden; }
+    .phone { position: absolute; left: 0; bottom: 0; width: 42%; max-width: 230px; background: #050C1A; border-radius: 34px; padding: 9px; border: 1px solid #22385E; box-shadow: 0 18px 40px rgba(0, 0, 0, .35); }
+    .phone img { border-radius: 26px; }
 
-    section { padding: 64px 0; }
-    h2 { font-size: clamp(28px, 3.6vw, 38px); letter-spacing: -1px; line-height: 1.15; font-weight: 800; }
-    .sub { color: var(--muted); font-size: 17px; max-width: 600px; margin-top: 10px; }
-    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 36px; }
-    .feature { background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 24px; box-shadow: var(--shadow); }
-    .feature .ico { width: 48px; height: 48px; border-radius: 16px; display: grid; place-items: center; margin-bottom: 16px; }
-    .feature svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-    .feature h3 { font-size: 18px; letter-spacing: -.2px; margin-bottom: 6px; }
-    .feature p { color: var(--muted); font-size: 15px; }
+    /* Why pay */
+    .why { background: var(--white); }
+    .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+    .card { background: var(--white); border: 1px solid var(--line); border-radius: 12px; padding: 26px; }
+    .card h3 { font-size: 21px; margin: 16px 0 8px; }
+    .card p { color: var(--slate); font-size: 15.5px; }
+    .icon { width: 44px; height: 44px; border-radius: 10px; background: var(--sky-tint); display: grid; place-items: center; color: var(--navy-2); }
+    .icon svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .icon.warm { background: #FFF1E8; color: var(--orange-text); }
+    .closing { margin-top: 36px; padding: 24px 28px; border-left: 4px solid var(--orange); background: var(--mist); border-radius: 0 12px 12px 0; font-size: 17px; max-width: 900px; }
 
-    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 36px; counter-reset: step; }
-    .step { padding: 4px 4px 4px 0; }
-    .step::before { counter-increment: step; content: counter(step); display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--tint); color: var(--brand-deep); font-weight: 800; font-size: 18px; margin-bottom: 14px; }
-    .step h3 { font-size: 18px; margin-bottom: 6px; }
-    .step p { color: var(--muted); font-size: 15px; }
+    /* Features */
+    .features { background: var(--sky-tint); }
+    .features .card { border-color: var(--sky-line); }
+    .soon { margin-top: 20px; display: flex; gap: 20px; align-items: flex-start; }
+    .badge { display: inline-block; font-size: 12.5px; font-weight: 600; letter-spacing: .04em; padding: 4px 10px; border-radius: 999px; background: var(--navy); color: var(--white); }
 
-    .sync { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 28px; padding: 40px; box-shadow: var(--shadow); }
-    .sync ul { list-style: none; padding: 0; margin-top: 18px; display: grid; gap: 12px; }
-    .sync li { display: flex; gap: 10px; color: var(--muted); }
-    .sync li::before { content: "✓"; color: var(--green); font-weight: 800; }
-    .devices { display: flex; align-items: flex-end; justify-content: center; gap: 18px; }
-    .laptop { width: 240px; height: 150px; border: 8px solid #0E1630; border-bottom-width: 14px; border-radius: 14px 14px 6px 6px; background: var(--bg); padding: 12px; }
-    .mini-phone { width: 86px; height: 170px; border: 6px solid #0E1630; border-radius: 20px; background: var(--bg); padding: 10px 8px; }
-    .bar { height: 8px; border-radius: 4px; background: var(--line); margin-bottom: 8px; }
-    .bar.b { background: linear-gradient(135deg, #3B5BFD, #6A4DF4); height: 34px; border-radius: 10px; }
-    .bar.s { width: 60%; }
+    /* Name */
+    .name { background: var(--white); }
+    .name-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: center; }
+    .equation { font-family: var(--serif); font-weight: 600; font-size: clamp(34px, 4.6vw, 54px); line-height: 1.2; }
+    .equation .plus, .equation .eq { color: var(--sky-text); font-weight: 500; padding: 0 .12em; }
+    .equation .k { color: var(--orange-text); }
+    .kannada { font-family: "Noto Sans Kannada", "Nirmala UI", "Tunga", sans-serif; font-weight: 600; }
+    .kannada-chip { display: inline-flex; align-items: baseline; gap: 10px; margin-top: 22px; padding: 10px 16px; border: 1px solid var(--sky-line); border-radius: 10px; background: var(--sky-tint); }
+    .kannada-chip .kannada { font-size: 30px; color: var(--navy-2); line-height: 1.3; }
+    .kannada-chip span:last-child { color: var(--slate); font-size: 15px; }
 
-    .only { display: grid; grid-template-columns: 1fr 1.1fr; gap: 40px; align-items: center; }
-    .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .col { background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 22px; box-shadow: var(--shadow); }
-    .col h3 { font-size: 16px; margin-bottom: 12px; }
-    .col ul, .plan ul { list-style: none; padding: 0; display: grid; gap: 10px; font-size: 15px; }
-    .col li, .plan li { display: flex; gap: 10px; }
-    .yes li::before, .plan li::before { content: "✓"; color: var(--green); font-weight: 800; }
-    .no li { color: var(--muted); }
-    .no li::before { content: "✕"; color: var(--muted); font-weight: 700; }
-    .plans { display: grid; grid-template-columns: repeat(2, minmax(0, 360px)); gap: 18px; margin-top: 36px; }
-    .plan { background: var(--surface); border: 1px solid var(--line); border-radius: 24px; padding: 28px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 10px; }
-    .plan.best { border: 2px solid var(--brand); }
-    .plan h3 { font-size: 18px; }
-    .plan .price { font-size: 40px; font-weight: 800; letter-spacing: -1.5px; line-height: 1.1; }
-    .plan .price small { font-size: 16px; font-weight: 500; color: var(--muted); letter-spacing: 0; }
-    .plan p { color: var(--muted); }
-    .plan ul { margin: 8px 0 14px; }
+    /* How it works and phone & web */
+    .how { background: var(--white); padding-top: 0; }
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; counter-reset: step; }
+    .step { border-top: 2px solid var(--navy); padding-top: 18px; }
+    .step::before { counter-increment: step; content: "0" counter(step); font-family: var(--serif); font-weight: 600; font-size: 15px; color: var(--orange-text); }
+    .step h3 { font-size: 20px; margin: 6px 0 6px; }
+    .step p { color: var(--slate); font-size: 15.5px; }
+    .devices { margin-top: 56px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .ticks { list-style: none; padding: 0; display: grid; gap: 12px; margin-top: 14px; }
+    .ticks li { display: flex; gap: 12px; color: var(--slate); }
+    .ticks li::before { content: ""; flex: none; width: 8px; height: 8px; margin-top: 9px; border-radius: 2px; background: var(--orange); }
+
+    /* Pricing */
+    .pricing { background: var(--mist); }
+    .plans { display: grid; grid-template-columns: repeat(2, minmax(0, 380px)); gap: 20px; }
+    .plan { background: var(--white); border: 1px solid var(--line); border-radius: 12px; padding: 30px; display: flex; flex-direction: column; gap: 10px; position: relative; }
+    .plan h3 { font-size: 22px; }
+    .price { font-family: var(--serif); font-weight: 600; font-size: 44px; line-height: 1.1; }
+    .price small { font-family: var(--sans); font-size: 16px; font-weight: 500; color: var(--slate); }
+    .plan > p { color: var(--slate); }
+    .plan .ticks { margin: 6px 0 18px; }
     .plan .btn { margin-top: auto; }
-    @media (max-width: 860px) { .only, .plans { grid-template-columns: 1fr; } }
-    @media (max-width: 480px) { .cols, #soon .grid { grid-template-columns: 1fr !important; } }
+    .plan.featured { background: var(--navy); border-color: var(--navy); color: var(--white); }
+    .plan.featured .price small, .plan.featured > p, .plan.featured .ticks li { color: #C9D6EA; }
+    .popular { position: absolute; top: -13px; right: 24px; background: var(--orange); color: var(--navy); font-size: 13px; font-weight: 600; padding: 4px 12px; border-radius: 999px; }
 
-    .final { text-align: center; background: linear-gradient(135deg, #3B5BFD, #6A4DF4); color: #fff; border-radius: 32px; padding: 56px 24px; }
-    .final p { opacity: .9; font-size: 17px; margin: 10px auto 26px; max-width: 480px; }
-    .final .btn { background: #fff; color: #2A3FD6; }
-    .final .btn-alt { background: transparent; color: #fff; border-color: rgba(255, 255, 255, .55); }
+    /* FAQ */
+    .faq { background: var(--white); }
+    .faq details { border-bottom: 1px solid var(--line); padding: 18px 0; max-width: 820px; }
+    .faq summary { cursor: pointer; list-style: none; font-weight: 600; font-size: 17px; display: flex; justify-content: space-between; gap: 16px; min-height: 28px; }
+    .faq summary::-webkit-details-marker { display: none; }
+    .faq summary::after { content: "+"; color: var(--orange-text); font-size: 22px; line-height: 1; }
+    .faq details[open] summary::after { content: "\2212"; }
+    .faq details p { margin-top: 10px; color: var(--slate); }
 
-    footer { padding: 36px 0 48px; color: var(--muted); font-size: 14px; display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; }
+    /* Final CTA and footer */
+    .final { background: var(--navy); color: var(--white); text-align: center; padding: 96px 0 72px; }
+    .final h2 { font-size: clamp(30px, 4vw, 46px); max-width: 760px; margin: 0 auto 28px; }
+    footer { background: var(--navy); color: #A9BBD6; border-top: 1px solid #1D3157; font-size: 14px; }
+    footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; padding-top: 28px; padding-bottom: 36px; }
+    footer a { color: var(--white); }
 
-    @media (max-width: 860px) {
-      .hero, .sync { grid-template-columns: 1fr; }
-      .hero { padding-top: 32px; gap: 36px; }
-      .grid, .steps { grid-template-columns: 1fr; }
-      .links { display: none; }
-      .sync { padding: 28px 22px; }
+    /* Motion */
+    .reveal { opacity: 0; transform: translateY(14px); transition: opacity .5s ease, transform .5s ease; }
+    .reveal.shown { opacity: 1; transform: none; }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .reveal { opacity: 1; transform: none; transition: none; }
+      header, .btn { transition: none; }
     }
-    @media (max-width: 420px) {
-      .btn { padding: 0 16px; }
-      nav .btn-ghost { display: none; }
+
+    /* Layout */
+    @media (max-width: 960px) {
+      .hero-grid, .name-grid { grid-template-columns: 1fr; gap: 40px; }
+      .showcase { justify-self: center; max-width: 480px; }
+      .cards, .steps, .devices { grid-template-columns: 1fr 1fr; }
+      .menu { display: none; }
+    }
+    @media (max-width: 640px) {
+      section { padding: 64px 0; }
+      .hero { padding: 40px 0 64px; }
+      .cards, .steps, .devices, .plans { grid-template-columns: 1fr; }
+      .cta-row .btn { flex: 1 1 100%; }
+      .soon { flex-direction: column; }
+      .closing { padding: 20px; }
+    }
+    @media (max-width: 400px) {
+      nav { gap: 12px; }
+      .brand { font-size: 20px; }
+      nav .btn { padding: 0 14px; }
     }
   </style>
 </head>
 <body>
-  <header>
-    <nav class="wrap">
-      <a class="logo" href="#top"><img src="icon.png" alt="">Simplek</a>
-      <div class="links">
+  <header id="top-bar">
+    <nav class="wrap" aria-label="Main">
+      <a class="brand" href="#top"><img src="icon.png" alt="" width="34" height="34">Simplek</a>
+      <div class="menu">
+        <a href="#why">Why Simplek</a>
         <a href="#features">Features</a>
-        <a href="#how">How it works</a>
-        <a href="#everywhere">Phone &amp; web</a>
         <a href="#pricing">Pricing</a>
+        <a href="#faq">FAQ</a>
       </div>
-      <a class="btn btn-ghost" href="app/">Log in</a>
-      <a class="btn btn-primary" href="app/?signup=1">Sign up</a>
+      <a class="login" href="app/">Log in</a>
+      <a class="btn btn-primary" href="app/?signup=1">Start free</a>
     </nav>
   </header>
 
   <main id="top">
-    <div class="wrap hero">
-      <div>
-        <span class="pill">Sales invoices only. Free for 30 a month.</span>
-        <h1>Invoicing <span>made easy.</span></h1>
-        <p class="lead">Simplek does one job: your GST sales invoices. No purchase entries, no stock registers, no accounting to learn. Create an invoice in under a minute, share it on WhatsApp, and hand your accountant a ready GSTR-1.</p>
-        <div class="cta">
-          <a class="btn btn-primary btn-lg" href="app/?signup=1">Create your account</a>
-          <a class="btn btn-ghost btn-lg" href="app/">Log in</a>
-        </div>
-        <p class="note">Free for up to 30 invoices a month. One account works on the web and in the Android app.</p>
-      </div>
-
-      <div class="phone" aria-hidden="true">
-        <small>Good morning</small>
-        <h4>Malabar Traders</h4>
-        <div class="card-hero">
-          <div style="font-size:12.5px;opacity:.85">To collect</div>
-          <div class="amount">₹19,800.00</div>
-          <div class="row"><div>Total sales<b>₹27,550.00</b></div><div>Invoices<b>5</b></div></div>
-        </div>
-        <div class="tiles">
-          <div class="tile"><div class="dot" style="background:rgba(59,91,253,.14)"></div>New invoice</div>
-          <div class="tile"><div class="dot" style="background:rgba(122,77,246,.16)"></div>Quotation</div>
-        </div>
-        <div class="list">
-          <div><i>S</i>Sample Catering<span>₹2,441</span><b class="badge due">Sent</b></div>
-          <div><i>K</i>Kiran Stores<span>₹8,260</span><b class="badge paid">Paid</b></div>
-        </div>
-      </div>
-    </div>
-
-    <section id="why">
-      <div class="wrap">
-        <div class="only">
-          <div>
-            <span class="pill">Why it's called Simplek</span>
-            <h2 style="margin-top:14px">Simple, on purpose.</h2>
-            <p class="sub">Most billing software is really accounting software, with screens you never open. Simplek leaves all of that out. It is only for creating sales invoices, and it makes that very easy.</p>
+    <section class="hero">
+      <div class="wrap hero-grid">
+        <div>
+          <p class="eyebrow">GST billing for Indian businesses</p>
+          <h1>Invoices in a minute. <span class="second">No accounting software needed.</span></h1>
+          <p class="lead">Create a GST invoice, share it on WhatsApp, and get paid. Your accountant gets GSTR-1 and Tally files, ready to use.</p>
+          <div class="cta-row">
+            <a class="btn btn-primary" href="app/?signup=1">Start free</a>
+            <a class="btn btn-outline" href="app/">Log in</a>
           </div>
-          <div class="cols">
-            <div class="col yes">
-              <h3>What Simplek does</h3>
-              <ul>
-                <li>GST sales invoices and quotations</li>
-                <li>Payments received and what's still due</li>
-                <li>GSTR-1 report, ready for filing</li>
-                <li>Export to TallyPrime, Excel, CSV and PDF</li>
-              </ul>
-            </div>
-            <div class="col no">
-              <h3>What it leaves out</h3>
-              <ul>
-                <li>Purchase invoices</li>
-                <li>Stock and inventory</li>
-                <li>Ledgers and full accounting</li>
-                <li>Anything you'd need training for</li>
-              </ul>
-            </div>
+          <p class="assurance"><span>Free for 30 invoices a month</span> · <span>Android app and web</span> · <span>A login for your accountant</span></p>
+        </div>
+        <div class="showcase" aria-label="The Simplek app and an invoice made with it">
+          <div class="invoice-card">
+            <picture>
+              <source srcset="invoice-sample.webp" type="image/webp">
+              <img src="invoice-sample.png" width="1100" height="1556" alt="A sample tax invoice made in Simplek, with GST, round off and amount in words">
+            </picture>
+          </div>
+          <div class="phone">
+            <picture>
+              <source srcset="app-home.webp" type="image/webp">
+              <img src="app-home.png" width="390" height="844" alt="The Simplek app home screen showing money to collect and quick actions">
+            </picture>
           </div>
         </div>
       </div>
     </section>
 
-    <section id="features">
+    <section class="why" id="why">
       <div class="wrap">
-        <h2>Everything a sales invoice needs. Nothing it doesn't.</h2>
-        <p class="sub">Simplek handles the paperwork of selling, so you can get back to the selling.</p>
-        <div class="grid">
-          <div class="feature">
-            <div class="ico" style="background:rgba(59,91,253,.13);color:#3B5BFD"><svg viewBox="0 0 24 24"><path d="M7 3h10a1 1 0 0 1 1 1v17l-3-2-3 2-3-2-3 2V4a1 1 0 0 1 1-1z"/><path d="M9 8h6M9 12h6"/></svg></div>
-            <h3>GST invoices</h3>
-            <p>CGST, SGST and IGST are split for you from the place of supply, with HSN/SAC codes and automatic invoice numbers.</p>
+        <div class="section-head reveal">
+          <h2>Why pay for a full accounting suite just to send invoices?</h2>
+        </div>
+        <div class="cards">
+          <div class="card reveal">
+            <div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v16"/></svg></div>
+            <h3>Big software, small use.</h3>
+            <p>Full accounting packages are built for accountants. Most owners only ever open the invoice screen, but pay for, and click past, everything else.</p>
           </div>
-          <div class="feature">
-            <div class="ico" style="background:rgba(122,77,246,.14);color:#7A4DF6"><svg viewBox="0 0 24 24"><path d="M14 3H7a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7z"/><path d="M14 3v4h4M9 13h6M9 17h4"/></svg></div>
+          <div class="card reveal">
+            <div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+            <h3>Hours of data entry.</h3>
+            <p>Purchases, stock and expenses need daily entry and trained staff. When they fall behind, the reports are wrong anyway.</p>
+          </div>
+          <div class="card reveal">
+            <div class="icon warm"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10a1 1 0 0 1 1 1v17l-3-2-3 2-3-2-3 2V4a1 1 0 0 1 1-1z"/><path d="M9 8h6M9 12h6"/></svg></div>
+            <h3>Invoicing can't wait.</h3>
+            <p>No invoice, no payment. Billing should be the fastest thing on your phone, not something you have to learn.</p>
+          </div>
+        </div>
+        <p class="closing reveal">Simplek does the part every business needs every day: correct, good-looking GST invoices, payments and dues. Everything else goes to your accountant in the formats they already use: GSTR-1, TallyPrime, Excel.</p>
+      </div>
+    </section>
+
+    <section class="features" id="features">
+      <div class="wrap">
+        <div class="section-head reveal">
+          <h2>Everything you need to bill. <span class="accent">Nothing you don't.</span></h2>
+        </div>
+        <div class="cards">
+          <div class="card reveal">
+            <div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10a1 1 0 0 1 1 1v17l-3-2-3 2-3-2-3 2V4a1 1 0 0 1 1-1z"/><path d="M9 8h6M9 12h6"/></svg></div>
+            <h3>GST invoices</h3>
+            <p>CGST, SGST and IGST are split for you from the place of supply, with HSN/SAC codes and automatic invoice numbers. Round-off and amount in words, done for you.</p>
+          </div>
+          <div class="card reveal">
+            <div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7z"/><path d="M14 3v4h4M9 13h6M9 17h4"/></svg></div>
             <h3>Quotations</h3>
             <p>Send an estimate first. When the customer says yes, turn it into an invoice in one tap.</p>
           </div>
-          <div class="feature">
-            <div class="ico" style="background:rgba(15,169,104,.14);color:#0FA968"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 9v.01M18 15v.01"/></svg></div>
+          <div class="card reveal">
+            <div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/></svg></div>
             <h3>Payments</h3>
             <p>Record cash, UPI, bank, card or cheque payments, in full or in part. Outstanding balances update themselves.</p>
           </div>
-          <div class="feature">
-            <div class="ico" style="background:rgba(227,138,11,.15);color:#E38A0B"><svg viewBox="0 0 24 24"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M12 3v12M8 7l4-4 4 4"/></svg></div>
+          <div class="card reveal">
+            <div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M12 3v12M8 7l4-4 4 4"/></svg></div>
             <h3>Share anywhere</h3>
-            <p>Clean PDFs with your logo, signature and UPI payment QR. Share by WhatsApp or email, or print.</p>
+            <p>Clean, bordered invoices with your logo, signature and UPI QR. Share by WhatsApp or email, or print.</p>
           </div>
-          <div class="feature">
-            <div class="ico" style="background:rgba(59,91,253,.13);color:#3B5BFD"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></div>
+          <div class="card reveal">
+            <div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></div>
             <h3>Ready for your accountant</h3>
             <p>Your GSTR-1 report builds itself from your invoices. Export it, or the whole period, to TallyPrime, Excel, CSV or PDF and send it across.</p>
           </div>
-          <div class="feature">
-            <div class="ico" style="background:rgba(15,169,104,.14);color:#0FA968"><svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
+          <div class="card reveal">
+            <div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 11l2 2 4-4"/></svg></div>
             <h3>A login for your accountant</h3>
             <p>Give your accountant their own view-only access to your invoices and GST reports, on the web or the app. No sharing passwords, and you can remove it any time.</p>
           </div>
         </div>
-      </div>
-    </section>
-
-    <section id="soon">
-      <div class="wrap">
-        <h2>Coming soon</h2>
-        <div class="grid" style="grid-template-columns:minmax(0,560px)">
-          <div class="feature">
-            <span class="pill">Coming soon</span>
-            <h3 style="margin-top:12px">Create invoices by asking</h3>
+        <div class="card soon reveal">
+          <div class="icon warm"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H8l-4 4z"/><path d="M8 10h8"/></svg></div>
+          <div>
+            <span class="badge">Coming soon</span>
+            <h3>Create invoices by asking</h3>
             <p>Type "Invoice Malnad Kitchen for catering, 15 people at ₹250 each" and Simplek's AI drafts the invoice for you to check and send.</p>
           </div>
         </div>
       </div>
     </section>
 
-    <section id="pricing">
-      <div class="wrap">
-        <h2>Simple pricing too</h2>
-        <p class="sub">Start free. Pay only if you send more than 30 invoices in a month.</p>
-        <div class="plans">
-          <div class="plan">
-            <h3>Free</h3>
-            <div class="price">₹0</div>
-            <p>Up to 30 invoices a month</p>
-            <ul>
-              <li>GST invoices and quotations</li>
-              <li>Payments and reports</li>
-              <li>Phone app and web</li>
-            </ul>
-            <a class="btn btn-ghost" href="app/?signup=1">Start free</a>
-          </div>
-          <div class="plan best">
-            <h3>Unlimited</h3>
-            <div class="price">₹250 <small>/ month</small></div>
-            <p>or ₹1,500 for a year</p>
-            <ul>
-              <li>Unlimited invoices</li>
-              <li>Everything in Free</li>
-              <li>Upgrade whenever you need it</li>
-            </ul>
-            <a class="btn btn-primary" href="app/?signup=1">Create your account</a>
-          </div>
+    <section class="name" id="name">
+      <div class="wrap name-grid">
+        <div class="reveal">
+          <p class="eyebrow" style="color: var(--sky-text)">Why the name Simplek?</p>
+          <h2 style="margin-top: 10px">Simple + Lekka</h2>
+          <p class="lead" style="margin-top: 14px">In Kannada, <span class="kannada" lang="kn">ಲೆಕ್ಕ</span> (lekka) means accounts, the everyday calculations of a business. Simplek is simple lekka: your business's numbers, kept simple.</p>
+        </div>
+        <div class="reveal">
+          <p class="equation" aria-label="Simple plus Lekka equals Simplek">Simple<span class="plus">+</span>Lekka<br><span class="eq">=</span> Simple<span class="k">k</span></p>
+          <p class="kannada-chip"><span class="kannada" lang="kn">ಲೆಕ್ಕ</span><span>lekka · accounts</span></p>
         </div>
       </div>
     </section>
 
-    <section id="how">
+    <section class="how" id="how">
       <div class="wrap">
-        <h2>Up and running in minutes</h2>
+        <div class="section-head reveal">
+          <h2>Up and running in minutes</h2>
+        </div>
         <div class="steps">
-          <div class="step"><h3>Create your account</h3><p>Sign up with your email and add your business details, GSTIN and bank or UPI information.</p></div>
-          <div class="step"><h3>Add customers and items</h3><p>Save them once. Simplek remembers prices and tax rates for next time.</p></div>
-          <div class="step"><h3>Send your first invoice</h3><p>Pick a customer, add items, preview the PDF and share it.</p></div>
+          <div class="step reveal"><h3>Create your account</h3><p>Sign up with your email and add your business details, GSTIN and bank or UPI information.</p></div>
+          <div class="step reveal"><h3>Add customers and items</h3><p>Save them once. Simplek remembers prices and tax rates for next time.</p></div>
+          <div class="step reveal"><h3>Send your first invoice</h3><p>Pick a customer, add items, preview the PDF and share it.</p></div>
         </div>
-      </div>
-    </section>
-
-    <section id="everywhere">
-      <div class="wrap">
-        <div class="sync">
-          <div>
-            <h2>Your phone and your computer, in step.</h2>
-            <ul>
+        <div class="devices" id="everywhere">
+          <div class="card reveal">
+            <h3>Your phone and your computer, in step.</h3>
+            <ul class="ticks">
               <li>One login for the website and the Android app.</li>
               <li>An invoice made on one shows up on the other.</li>
+            </ul>
+          </div>
+          <div class="card reveal">
+            <h3>Safe by design.</h3>
+            <ul class="ticks">
               <li>Your data is stored in the cloud, not on one device, and only you and people you invite can see it.</li>
               <li>On the phone, unlock with your fingerprint or face.</li>
             </ul>
           </div>
-          <div class="devices" aria-hidden="true">
-            <div class="laptop"><div class="bar s"></div><div class="bar b"></div><div class="bar"></div><div class="bar s"></div></div>
-            <div class="mini-phone"><div class="bar s"></div><div class="bar b"></div><div class="bar"></div><div class="bar"></div><div class="bar s"></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="pricing" id="pricing">
+      <div class="wrap">
+        <div class="section-head reveal">
+          <h2>Simple pricing too</h2>
+          <p class="lead">Start free. Pay only if you send more than 30 invoices in a month.</p>
+        </div>
+        <div class="plans">
+          <div class="plan reveal">
+            <h3>Free</h3>
+            <div class="price">₹0</div>
+            <p>Up to 30 invoices a month</p>
+            <ul class="ticks">
+              <li>GST invoices and quotations</li>
+              <li>Payments and reports</li>
+              <li>Android app and web</li>
+            </ul>
+            <a class="btn btn-outline-dark" href="app/?signup=1">Start free</a>
+          </div>
+          <div class="plan featured reveal">
+            <span class="popular">Most popular</span>
+            <h3>Unlimited</h3>
+            <div class="price">₹250 <small>/ month</small></div>
+            <p>or ₹1,500 for a year</p>
+            <ul class="ticks">
+              <li>Unlimited invoices</li>
+              <li>Everything in Free</li>
+              <li>Upgrade whenever you need it</li>
+            </ul>
+            <a class="btn btn-primary" href="app/?signup=1">Start free</a>
           </div>
         </div>
       </div>
     </section>
 
-    <section>
+    <section class="faq" id="faq">
       <div class="wrap">
-        <div class="final">
-          <h2>Ready to send your next invoice?</h2>
-          <p>Set up your business once and bill from anywhere.</p>
-          <div class="cta" style="justify-content:center;margin-top:0">
-            <a class="btn btn-lg" href="app/?signup=1">Create your account</a>
-            <a class="btn btn-lg btn-alt" href="app/">Log in</a>
-          </div>
+        <div class="section-head reveal">
+          <h2>Questions</h2>
         </div>
+        <details class="reveal">
+          <summary>Does Simplek do purchases and stock?</summary>
+          <p>Simplek focuses on invoices, quotations and payments. Your accountant can take everything into TallyPrime in one export.</p>
+        </details>
+        <details class="reveal">
+          <summary>Is my data safe?</summary>
+          <p>Your data is stored in the cloud, not on one phone. Only you and the people you invite can see it.</p>
+        </details>
+        <details class="reveal">
+          <summary>Can my accountant see my invoices?</summary>
+          <p>Yes. Give them their own view-only login and remove it any time.</p>
+        </details>
+      </div>
+    </section>
+
+    <section class="final">
+      <div class="wrap reveal">
+        <h2>Your next invoice could be out in a minute.</h2>
+        <a class="btn btn-primary" href="app/?signup=1">Start free</a>
       </div>
     </section>
   </main>
 
-  <footer class="wrap">
-    <span>© Simplek — Invoicing made easy</span>
-    <span><a href="app/">Open the web app</a></span>
+  <footer>
+    <div class="wrap">
+      <span>© Simplek · GST invoicing made simple</span>
+      <span><a href="app/">Log in</a></span>
+    </div>
   </footer>
+
+  <script>
+    (function () {
+      var bar = document.getElementById('top-bar');
+      var hero = document.querySelector('.hero');
+      function onScroll() {
+        var heroBottom = hero.getBoundingClientRect().bottom;
+        bar.classList.toggle('scrolled', heroBottom <= bar.offsetHeight);
+      }
+      window.addEventListener('scroll', onScroll, { passive: true });
+      onScroll();
+
+      var items = document.querySelectorAll('.reveal');
+      var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (reduce || !('IntersectionObserver' in window)) {
+        items.forEach(function (el) { el.classList.add('shown'); });
+        return;
+      }
+      var observer = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('shown');
+            observer.unobserve(entry.target);
+          }
+        });
+      }, { rootMargin: '0px 0px -40px 0px' });
+      items.forEach(function (el) { observer.observe(el); });
+    })();
+  </script>
 </body>
 </html>
