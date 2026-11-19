@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import 'platform/local_files.dart';
@@ -78,25 +79,29 @@ Future<pw.MemoryImage?> loadPdfSignature(String? path) async {
   return pw.MemoryImage(_trimmed[key] ??= await trimSignatureImage(bytes));
 }
 
-/// The signature block printed at the bottom right of a document.
-pw.Widget pdfSignatureBlock(pw.MemoryImage? signature) => pw.Column(
+/// The signature area: the signature centred above a rule, then
+/// "Authorised signatory". The image keeps its proportions and is never
+/// stretched, cut off or pushed to one side.
+pw.Widget pdfSignatureBlock(
+  pw.MemoryImage? signature, {
+  PdfColor lineColor = PdfColors.black,
+}) => pw.Column(
   crossAxisAlignment: pw.CrossAxisAlignment.center,
   children: [
-    if (signature != null)
-      pw.Container(
-        width: signaturePdfWidth,
-        height: signaturePdfHeight,
-        alignment: pw.Alignment.bottomCenter,
-        child: pw.Image(signature, fit: pw.BoxFit.contain),
-      )
-    else
-      pw.SizedBox(width: signaturePdfWidth, height: 36),
+    pw.Container(
+      width: signaturePdfWidth,
+      height: signaturePdfHeight,
+      alignment: pw.Alignment.bottomCenter,
+      child: signature == null
+          ? null
+          : pw.Image(signature, fit: pw.BoxFit.contain),
+    ),
     pw.Container(
       width: signaturePdfWidth,
       margin: const pw.EdgeInsets.only(top: 4),
       padding: const pw.EdgeInsets.only(top: 4),
-      decoration: const pw.BoxDecoration(
-        border: pw.Border(top: pw.BorderSide(width: 0.6)),
+      decoration: pw.BoxDecoration(
+        border: pw.Border(top: pw.BorderSide(width: 1, color: lineColor)),
       ),
       child: pw.Text('Authorised signatory', textAlign: pw.TextAlign.center),
     ),

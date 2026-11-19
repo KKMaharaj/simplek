@@ -263,3 +263,61 @@ applied to the live project by 2026-09-04.
 - `https://simplek.pages.dev/app/` added to Supabase Auth Redirect URLs. Site
   URL stays `simplek://login-callback/` for the phone app.
 - Not yet tried: signing up or logging in on the live web app.
+
+## November 19 changes (change request of 19 Nov 2026, version 1.2.0 build 20261120)
+
+1. **Signature editor** (`lib/image_editor.dart`, `crop_your_image`): uploaded
+   signature, logo and payment QR open a full-screen editor with free crop,
+   presets (Signature shape 200:84, Square), pinch/scroll zoom, drag, rotate
+   and Reset; a Clean background switch with a strength slider and previews on
+   white, on a chequered background and inside the invoice signature box.
+   Tiles in onboarding and Settings offer Edit / crop, Upload a new one, Draw
+   again and Remove. A removed image is now removed on other devices too.
+2. **Default place of supply removed** from onboarding and Settings. New
+   invoices and quotations start with the business state and switch to the
+   customer's state on selection; editing keeps the saved value. The
+   `place_of_supply` column in `business_profiles` is left unused, not dropped.
+3. **Financial year field removed.** The server already derives the year from
+   the document date. The quotation number call still sends an empty
+   `p_financial_year` so the 3-argument function keeps matching; the column is
+   not dropped.
+4. **App preferences:** theme and fingerprint/face unlock now live only at the
+   bottom of Business Settings. Removed from More, the sidebar and the Home top
+   bar.
+5. **Home recent invoices** open that invoice.
+6. **Invoice view** (`InvoiceViewPage`): tapping an invoice in the list or on
+   Home opens its PDF with Share PDF, WhatsApp, Email, Print, Download (web),
+   More → Edit / Duplicate / Record payment (Payments pre-selects the invoice),
+   and Total / Paid / Balance due / Due date. Lists use customer name,
+   `number • dd/mm/yyyy`, Indian-format amounts and status chips, with Preview
+   first in the ⋮ menu. View-only accountants get no edit actions.
+7. **New PDF layout** (`lib/document_pdf.dart`) after the Eesha Herbals
+   reference, for invoices and quotations: page frame on every page, header,
+   bordered boxes, HSN/SAC column (from the product), repeated table header,
+   totals per GST rate, round off, payment and terms/signature boxes kept
+   together, `Page x of y`. Noto Sans is embedded (`assets/fonts`, OFL) so `₹`
+   prints. **Round off:** new documents save `total_amount` rounded to the
+   rupee (50 paise up); subtotal and tax stay exact; older documents show no
+   round off. UPI QR now pre-fills the balance due. Tested with
+   `test/document_pdf_test.dart` (9 cases; `SIMPLEK_PDF_QA=1` writes PDFs to
+   `tmp/pdfs-new`). Indian-script customer names were not tested in the PDF;
+   the `pdf` package does not shape Kannada/Hindi, so expect them to print
+   incorrectly.
+8. **Numbering:** confirmed every number comes from
+   `allocate_business_document_number` (2-digit serials, then 100, 101 ...;
+   `0022` and `22` read as the same serial). Added
+   `supabase/tests/20261119_document_number_format_regressions.sql` (passed
+   locally and on live). Settings and onboarding warn when a prefix would push
+   numbers past 16 characters. Existing numbers were not renumbered.
+9. **Not GST registered:** no GST rate or customer GSTIN fields, tax saved as
+   0, PDF titled INVOICE with no GST columns or lines. Registered businesses
+   always get TAX INVOICE. Editing an old taxed invoice keeps its tax.
+
+Also: Indian digit grouping on Home and lists (`lib/money.dart`); list dates
+as dd/mm/yyyy. Test plan cells ONB-001/006/008/011/012, NAV-008, INV-020 and
+DOC-001/004/014/015/016 updated (`tool/update_test_plan.dart`).
+
+Not done in this round: forgot password and sign-up OTP (owner decision).
+Not tried by hand on the phone or in the logged-in web app; the place-of-
+supply prefill has no automated test (the builder needs a live Supabase
+session in tests).

@@ -4,19 +4,19 @@ import 'document_text.dart';
 import 'document_sharing.dart';
 import 'invoice_palette.dart';
 import 'whatsapp_contact.dart';
-import 'payment_pdf.dart';
 import 'modern_ui.dart';
 import 'offline_queue.dart';
+import 'document_pdf.dart';
+import 'money.dart';
 import 'live_sync.dart';
 import 'app_lock.dart';
 import 'business_access.dart';
 import 'platform/local_files.dart';
-import 'signature_image.dart';
 import 'signature_pad.dart';
+import 'image_editor.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/services.dart';
@@ -150,6 +150,62 @@ String? _prefixValidator(String? value) =>
     RegExp(r'^[A-Za-z0-9-]{1,20}$').hasMatch(value?.trim() ?? '')
     ? null
     : 'Use 1-20 letters, numbers, or hyphens';
+
+/// GST rules allow at most 16 characters in an invoice number. Numbers look
+/// like PREFIX/2026-27/NN, so the prefix plus 11 characters (13 from the
+/// 100th document) must fit. Returns a warning to show, or null.
+String? prefixLengthWarning(String prefix) {
+  final clean = prefix.trim();
+  if (clean.isEmpty) return null;
+  final length = clean.length + '/2026-27/01'.length;
+  if (length > 16) {
+    return 'Numbers like $clean/2026-27/01 have $length characters. GST allows 16. '
+        'Use a prefix of 5 characters or fewer.';
+  }
+  if (length + 1 > 16) {
+    return 'From the 100th document a year, numbers would pass the 16-character GST limit. '
+        'A prefix of 4 characters or fewer avoids this.';
+  }
+  return null;
+}
+
+/// Shows [prefixLengthWarning] for the prefix fields as the user types.
+class _PrefixLengthWarning extends StatelessWidget {
+  const _PrefixLengthWarning(this.controllers);
+  final List<TextEditingController> controllers;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: Listenable.merge(controllers),
+    builder: (context, _) {
+      final warnings = {
+        for (final controller in controllers)
+          ?prefixLengthWarning(controller.text),
+      };
+      if (warnings.isEmpty) return const SizedBox.shrink();
+      return Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(
+              Icons.warning_amber_rounded,
+              size: 18,
+              color: SimplekColors.warning,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                warnings.join('\n'),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
 
 String _normaliseState(String value) =>
     value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
@@ -708,6 +764,13 @@ class OfflineStore {
   });
 }
 
+BusinessImageKind _imageKindFor(String type) => switch (type) {
+  'signature' => BusinessImageKind.signature,
+  'qr' || 'payment QR' => BusinessImageKind.qr,
+  _ => BusinessImageKind.logo,
+};
+
+/// Picks an image from the gallery and opens it in the crop editor.
 Future<String?> _pickAndEditImage(
   BuildContext context, {
   required String label,
@@ -717,109 +780,13 @@ Future<String?> _pickAndEditImage(
     imageQuality: 95,
   );
   if (image == null) return null;
-  final pickedBytes = await image.readAsBytes();
+  final bytes = await image.readAsBytes();
   if (!context.mounted) return null;
-  var turns = 0;
-  var cropSquare = false;
-  final edit = await showDialog<(int, bool)?>(
-    context: context,
-    builder: (dialogContext) => StatefulBuilder(
-      builder: (context, setDialogState) => AlertDialog(
-        title: Text('Edit $label'),
-        content: SizedBox(
-          width: 320,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              AspectRatio(
-                aspectRatio: cropSquare ? 1 : 4 / 3,
-                child: ClipRect(
-                  child: RotatedBox(
-                    quarterTurns: turns,
-                    child: Image.memory(
-                      pickedBytes,
-                      fit: cropSquare ? BoxFit.cover : BoxFit.contain,
-                    ),
-                  ),
-                ),
-              ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Crop to square'),
-                value: cropSquare,
-                onChanged: (value) => setDialogState(() => cropSquare = value),
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  IconButton(
-                    tooltip: 'Rotate left',
-                    onPressed: () =>
-                        setDialogState(() => turns = (turns + 3) % 4),
-                    icon: const Icon(Icons.rotate_left),
-                  ),
-                  IconButton(
-                    tooltip: 'Rotate right',
-                    onPressed: () =>
-                        setDialogState(() => turns = (turns + 1) % 4),
-                    icon: const Icon(Icons.rotate_right),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, (turns, cropSquare)),
-            child: const Text('Use image'),
-          ),
-        ],
-      ),
-    ),
-  );
-  if (edit == null) return null;
-  final source = await ui.instantiateImageCodec(pickedBytes);
-  final frame = await source.getNextFrame();
-  final original = frame.image;
-  final side = original.width < original.height
-      ? original.width
-      : original.height;
-  final src = edit.$2
-      ? Rect.fromLTWH(
-          (original.width - side) / 2,
-          (original.height - side) / 2,
-          side.toDouble(),
-          side.toDouble(),
-        )
-      : Rect.fromLTWH(
-          0,
-          0,
-          original.width.toDouble(),
-          original.height.toDouble(),
-        );
-  final rotated = edit.$1.isOdd;
-  final outWidth = (rotated ? src.height : src.width).round();
-  final outHeight = (rotated ? src.width : src.height).round();
-  final recorder = ui.PictureRecorder();
-  final canvas = Canvas(recorder)
-    ..translate(outWidth / 2, outHeight / 2)
-    ..rotate(edit.$1 * 3.141592653589793 / 2);
-  canvas.drawImageRect(
-    original,
-    src,
-    Rect.fromCenter(center: Offset.zero, width: src.width, height: src.height),
-    Paint(),
-  );
-  final output = await recorder.endRecording().toImage(outWidth, outHeight);
-  final png = await output.toByteData(format: ui.ImageByteFormat.png);
-  return writeTempFile(
-    'simplek_image_${DateTime.now().millisecondsSinceEpoch}.png',
-    png?.buffer.asUint8List() ?? pickedBytes,
+  return editBusinessImage(
+    context,
+    bytes: bytes,
+    kind: _imageKindFor(label),
+    businessName: BusinessSettings.profile.value['name'] ?? '',
   );
 }
 
@@ -1337,14 +1304,6 @@ class _Sidebar extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 8),
-              ValueListenableBuilder<ThemeMode>(
-                valueListenable: BusinessSettings.themeMode,
-                builder: (context, mode, _) => ThemeModeToggle(
-                  mode: mode,
-                  onChanged: BusinessSettings.setThemeMode,
-                ),
-              ),
-              const SizedBox(height: 8),
               TextButton.icon(
                 onPressed: () => _confirmLogout(context),
                 icon: const Icon(Icons.logout),
@@ -1489,18 +1448,6 @@ class _MorePage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 22),
-          Text('Appearance', style: theme.textTheme.titleLarge),
-          const SizedBox(height: 10),
-          ValueListenableBuilder<ThemeMode>(
-            valueListenable: BusinessSettings.themeMode,
-            builder: (context, mode, _) => ThemeModeToggle(
-              mode: mode,
-              onChanged: BusinessSettings.setThemeMode,
-            ),
-          ),
-          const SizedBox(height: 16),
-          const AppLockSetting(),
-          const SizedBox(height: 16),
           OutlinedButton.icon(
             onPressed: () => _confirmLogout(context),
             icon: const Icon(Icons.logout),
@@ -2759,8 +2706,6 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
   late final TextEditingController _emailController;
   late final TextEditingController _panController;
   late final TextEditingController _stateController;
-  late final TextEditingController _placeOfSupplyController;
-  late final TextEditingController _financialYearController;
   late final TextEditingController _invoicePrefixController;
   late final TextEditingController _quotationPrefixController;
   late final TextEditingController _quotationTermsController;
@@ -2805,12 +2750,6 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
     _ifscController = TextEditingController();
     _panController = TextEditingController();
     _stateController = TextEditingController();
-    _placeOfSupplyController = TextEditingController();
-    final now = DateTime.now();
-    final startYear = now.month >= 4 ? now.year : now.year - 1;
-    _financialYearController = TextEditingController(
-      text: '$startYear-${(startYear + 1).toString().substring(2)}',
-    );
     _invoicePrefixController = TextEditingController(text: 'INV');
     _quotationPrefixController = TextEditingController(text: 'QTN');
   }
@@ -2833,8 +2772,6 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
       _upiController,
       _panController,
       _stateController,
-      _placeOfSupplyController,
-      _financialYearController,
       _invoicePrefixController,
       _quotationPrefixController,
     ]) {
@@ -2908,6 +2845,60 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
       if (type == 'qr') _qrPath = path;
     });
   }
+
+  Future<void> _editImage(String type) async {
+    final current = switch (type) {
+      'logo' => _logoPath,
+      'signature' => _signaturePath,
+      _ => _qrPath,
+    };
+    final bytes = await readLocalFile(current);
+    if (bytes == null || !mounted) return;
+    final path = await editBusinessImage(
+      context,
+      bytes: bytes,
+      kind: _imageKindFor(type),
+      businessName: BusinessSettings.profile.value['name'] ?? '',
+    );
+    if (path == null || !mounted) return;
+    setState(() {
+      if (type == 'logo') _logoPath = path;
+      if (type == 'signature') _signaturePath = path;
+      if (type == 'qr') _qrPath = path;
+    });
+  }
+
+  void _removeImage(String type) => setState(() {
+    if (type == 'logo') _logoPath = '';
+    if (type == 'signature') _signaturePath = '';
+    if (type == 'qr') _qrPath = '';
+  });
+
+  Widget _brandingTiles() => Row(
+    children: [
+      for (final (type, label) in const [
+        ('logo', 'Logo'),
+        ('signature', 'Signature'),
+        ('qr', 'Payment QR'),
+      ]) ...[
+        if (type != 'logo') const SizedBox(width: 10),
+        Expanded(
+          child: BusinessImageTile(
+            label: label,
+            path: switch (type) {
+              'logo' => _logoPath,
+              'signature' => _signaturePath,
+              _ => _qrPath,
+            },
+            onUpload: () => _pickImage(type),
+            onEdit: () => _editImage(type),
+            onDraw: type == 'signature' ? _drawSignature : null,
+            onRemove: () => _removeImage(type),
+          ),
+        ),
+      ],
+    ],
+  );
 
   Future<void> _drawSignature() async {
     final path = await showDialog<String>(
@@ -2991,8 +2982,6 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
         'pan': _panController.text.trim().toUpperCase(),
         'gstRegistrationType': _gstRegistrationType,
         'businessState': _stateController.text.trim(),
-        'placeOfSupply': _placeOfSupplyController.text.trim(),
-        'financialYear': _financialYearController.text.trim(),
         'invoicePrefix': _invoicePrefixController.text.trim().toUpperCase(),
         'quotationPrefix': _quotationPrefixController.text.trim().toUpperCase(),
       });
@@ -3212,48 +3201,10 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
                 (state) => DropdownMenuItem(value: state, child: Text(state)),
               )
               .toList(),
-          onChanged: (value) => setState(() {
-            _stateController.text = value ?? '';
-            if (_placeOfSupplyController.text.isEmpty) {
-              _placeOfSupplyController.text = value ?? '';
-            }
-          }),
+          onChanged: (value) =>
+              setState(() => _stateController.text = value ?? ''),
           validator: (value) =>
               value == null ? 'Select the business state' : null,
-        ),
-        const SizedBox(height: 12),
-        SearchableStateField(
-          initialValue:
-              _indianStatesAndUnionTerritories.contains(
-                _placeOfSupplyController.text,
-              )
-              ? _placeOfSupplyController.text
-              : null,
-          decoration: const InputDecoration(
-            labelText: 'Default place of supply',
-            border: OutlineInputBorder(),
-          ),
-          items: _indianStatesAndUnionTerritories
-              .map(
-                (state) => DropdownMenuItem(value: state, child: Text(state)),
-              )
-              .toList(),
-          onChanged: (value) => _placeOfSupplyController.text = value ?? '',
-          validator: (value) =>
-              value == null ? 'Select the default place of supply' : null,
-        ),
-        const SizedBox(height: 12),
-        TextFormField(
-          controller: _financialYearController,
-          decoration: const InputDecoration(
-            labelText: 'Financial year',
-            hintText: '2026-27',
-            border: OutlineInputBorder(),
-          ),
-          validator: (value) =>
-              RegExp(r'^20[0-9]{2}-[0-9]{2}$').hasMatch(value!.trim())
-              ? null
-              : 'Use format 2026-27',
         ),
         const SizedBox(height: 12),
         Row(
@@ -3281,6 +3232,10 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
             ),
           ],
         ),
+        _PrefixLengthWarning([
+          _invoicePrefixController,
+          _quotationPrefixController,
+        ]),
         const SizedBox(height: 12),
         TextFormField(
           controller: _addressController,
@@ -3365,26 +3320,11 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
           'Upload your logo and signature. Enter a UPI ID to generate a QR code, or attach an existing payment QR image.',
         ),
         const SizedBox(height: 14),
-        Row(
-          children: [
-            _onboardingImage('Logo', _logoPath, () => _pickImage('logo')),
-            const SizedBox(width: 10),
-            _onboardingImage(
-              'Signature',
-              _signaturePath,
-              () => _pickImage('signature'),
-            ),
-            const SizedBox(width: 10),
-            _onboardingImage('Payment QR', _qrPath, () => _pickImage('qr')),
-          ],
-        ),
-        Align(
-          alignment: Alignment.center,
-          child: TextButton.icon(
-            onPressed: _drawSignature,
-            icon: const Icon(Icons.draw_outlined),
-            label: const Text('Draw signature'),
-          ),
+        _brandingTiles(),
+        const SizedBox(height: 6),
+        Text(
+          'Tap a tile to upload, crop, draw or remove.',
+          style: Theme.of(context).textTheme.bodySmall,
         ),
         const SizedBox(height: 18),
         TextFormField(
@@ -3480,35 +3420,6 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
       ],
     ),
   );
-
-  Widget _onboardingImage(String label, String path, VoidCallback onTap) =>
-      Expanded(
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
-            height: 110,
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey.shade400),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Column(
-              children: [
-                Expanded(
-                  child: localFileExists(path)
-                      ? localImage(path)
-                      : const Icon(
-                          Icons.add_photo_alternate_outlined,
-                          size: 34,
-                        ),
-                ),
-                Text(label, overflow: TextOverflow.ellipsis),
-              ],
-            ),
-          ),
-        ),
-      );
 }
 
 class GlobalSearchPage extends StatefulWidget {
@@ -3785,7 +3696,7 @@ class _DashboardPageState extends State<DashboardPage> {
         Supabase.instance.client
             .from('invoices')
             .select(
-              'invoice_number, customer_name, invoice_date, status, total_amount, balance_amount',
+              'id, invoice_number, customer_name, invoice_date, status, total_amount, balance_amount',
             )
             .neq('status', 'draft')
             .neq('status', 'cancelled')
@@ -3831,7 +3742,7 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  String _money(double amount) => '₹${amount.toStringAsFixed(2)}';
+  String _money(double amount) => rupees(amount);
 
   double _asDouble(dynamic value) => value is num
       ? value.toDouble()
@@ -3859,20 +3770,6 @@ class _DashboardPageState extends State<DashboardPage> {
             onPressed: _isLoadingSummary ? null : _loadSummary,
             icon: const Icon(Icons.refresh),
           ),
-          Builder(
-            builder: (context) {
-              final dark = Theme.of(context).brightness == Brightness.dark;
-              return IconButton(
-                tooltip: dark ? 'Switch to light mode' : 'Switch to dark mode',
-                onPressed: () => BusinessSettings.setThemeMode(
-                  dark ? ThemeMode.light : ThemeMode.dark,
-                ),
-                icon: Icon(
-                  dark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
-                ),
-              );
-            },
-          ),
           const SizedBox(width: 8),
         ],
       ),
@@ -3890,11 +3787,12 @@ class _DashboardPageState extends State<DashboardPage> {
         recent: _recentInvoices
             .map(
               (row) => <String, String>{
+                'id': row['id']?.toString() ?? '',
                 'number': row['invoice_number']?.toString() ?? 'Invoice',
                 'customer': row['customer_name']?.toString() ?? '',
                 'amount': _money(_asDouble(row['total_amount'])),
                 'status': row['status']?.toString() ?? 'draft',
-                'date': row['invoice_date']?.toString() ?? '',
+                'date': displayDate(parseStoredDate(row['invoice_date'])),
               },
             )
             .toList(),
@@ -3906,6 +3804,8 @@ class _DashboardPageState extends State<DashboardPage> {
         },
         onProduct: () => _openPage(context, const AddProductPage()),
         onInvoices: () => DesignSettings.destination.value = 1,
+        onOpenInvoice: (id) =>
+            _openPage(context, InvoiceViewPage(invoiceId: id)),
         onRefresh: _loadSummary,
       ),
     );
@@ -4232,7 +4132,7 @@ class _CustomerHistoryPageState extends State<CustomerHistoryPage> {
   double _amount(dynamic value) => value is num
       ? value.toDouble()
       : double.tryParse(value?.toString() ?? '') ?? 0;
-  String _money(double value) => '₹${value.toStringAsFixed(2)}';
+  String _money(double amount) => rupees(amount);
 
   @override
   Widget build(BuildContext context) {
@@ -4441,8 +4341,6 @@ class BusinessSettings {
   static const _panKey = 'business_pan';
   static const _gstRegistrationTypeKey = 'business_gst_registration_type';
   static const _businessStateKey = 'business_state';
-  static const _placeOfSupplyKey = 'business_place_of_supply';
-  static const _financialYearKey = 'business_financial_year';
   static const _invoicePrefixKey = 'business_invoice_prefix';
   static const _quotationPrefixKey = 'business_quotation_prefix';
   static final ValueNotifier<bool> isGstRegistered = ValueNotifier(false);
@@ -4518,7 +4416,8 @@ class BusinessSettings {
     String type,
     String fallback,
   ) async {
-    if (objectPath.isEmpty) return fallback;
+    // An empty path in the cloud means the image was removed.
+    if (objectPath.isEmpty) return '';
     try {
       final bytes = await Supabase.instance.client.storage
           .from('business-media')
@@ -4575,8 +4474,6 @@ class BusinessSettings {
       'gstRegistrationType':
           preferences.getString(_gstRegistrationTypeKey) ?? 'Regular',
       'businessState': preferences.getString(_businessStateKey) ?? '',
-      'placeOfSupply': preferences.getString(_placeOfSupplyKey) ?? '',
-      'financialYear': preferences.getString(_financialYearKey) ?? '',
       'invoicePrefix': preferences.getString(_invoicePrefixKey) ?? 'INV',
       'invoiceTheme':
           preferences.getString(_invoiceThemeCacheKey) ?? 'white-blue',
@@ -4645,8 +4542,6 @@ class BusinessSettings {
         'gstRegistrationType':
             row['gst_registration_type']?.toString() ?? 'Regular',
         'businessState': row['business_state']?.toString() ?? '',
-        'placeOfSupply': row['place_of_supply']?.toString() ?? '',
-        'financialYear': row['financial_year']?.toString() ?? '',
         'invoicePrefix': row['invoice_prefix']?.toString() ?? 'INV',
         'invoiceTheme': InvoicePalette.resolve(
           user.userMetadata?['invoice_theme']?.toString(),
@@ -4778,7 +4673,9 @@ class BusinessSettings {
     try {
       final rows = await Supabase.instance.client
           .from('products')
-          .select('id, name, product_type, selling_price, uqc_code, gst_rate')
+          .select(
+            'id, name, product_type, sku, selling_price, uqc_code, gst_rate, hsn_sac_code',
+          )
           .eq('is_active', true)
           .order('name')
           .limit(100);
@@ -4917,8 +4814,6 @@ class BusinessSettings {
       'pan': value['pan'] ?? '',
       'gst_registration_type': value['gstRegistrationType'] ?? 'Regular',
       'business_state': value['businessState'] ?? '',
-      'place_of_supply': value['placeOfSupply'] ?? '',
-      'financial_year': value['financialYear'] ?? '',
       'invoice_prefix': value['invoicePrefix'] ?? 'INV',
       'quotation_prefix': value['quotationPrefix'] ?? 'QTN',
       if (mediaPaths[0] != null) 'logo_object_path': mediaPaths[0],
@@ -4976,14 +4871,8 @@ class BusinessSettings {
       _businessStateKey,
       value['businessState'] ?? '',
     );
-    await preferences.setString(
-      _placeOfSupplyKey,
-      value['placeOfSupply'] ?? '',
-    );
-    await preferences.setString(
-      _financialYearKey,
-      value['financialYear'] ?? '',
-    );
+    await preferences.remove('business_place_of_supply');
+    await preferences.remove('business_financial_year');
     await preferences.setString(
       _invoicePrefixKey,
       value['invoicePrefix'] ?? 'INV',
@@ -5004,7 +4893,9 @@ class BusinessSettingsPage extends StatefulWidget {
 
 class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
   Future<void> _previewInvoiceTheme() async {
-    final sample = InvoiceLineItem();
+    final sample = InvoiceLineItem(
+      gstApplies: BusinessSettings.isGstRegistered.value,
+    );
     sample.productController.text = 'Sample product';
     sample.quantityController.text = '2';
     sample.rateController.text = '500';
@@ -5039,8 +4930,9 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
             dueDate: DateTime.now().add(const Duration(days: 7)),
             terms: _invoiceTermsController.text,
             items: [sample],
-            invoiceNumber: 'SAMPLE-001',
-            balanceDue: 1180,
+            invoiceNumber: 'SAMPLE/2026-27/01',
+            balanceDue: roundToRupee(sample.total),
+            gstDocument: BusinessSettings.isGstRegistered.value,
             previewProfile: previewProfile,
           ),
         ),
@@ -5067,8 +4959,6 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
   late final TextEditingController _upiController;
   late final TextEditingController _panController;
   late final TextEditingController _stateController;
-  late final TextEditingController _placeOfSupplyController;
-  late final TextEditingController _financialYearController;
   late final TextEditingController _invoicePrefixController;
   late final TextEditingController _quotationPrefixController;
   String _gstRegistrationType = 'Regular';
@@ -5105,12 +4995,6 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
     _upiController = TextEditingController(text: profile['upiId']);
     _panController = TextEditingController(text: profile['pan']);
     _stateController = TextEditingController(text: profile['businessState']);
-    _placeOfSupplyController = TextEditingController(
-      text: profile['placeOfSupply'],
-    );
-    _financialYearController = TextEditingController(
-      text: profile['financialYear'],
-    );
     _invoicePrefixController = TextEditingController(
       text: profile['invoicePrefix'] ?? 'INV',
     );
@@ -5140,8 +5024,6 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
     _upiController.dispose();
     _panController.dispose();
     _stateController.dispose();
-    _placeOfSupplyController.dispose();
-    _financialYearController.dispose();
     _invoicePrefixController.dispose();
     _quotationPrefixController.dispose();
     super.dispose();
@@ -5159,6 +5041,60 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
       if (type == 'qr') _qrPath = path;
     });
   }
+
+  Future<void> _editImage(String type) async {
+    final current = switch (type) {
+      'logo' => _logoPath,
+      'signature' => _signaturePath,
+      _ => _qrPath,
+    };
+    final bytes = await readLocalFile(current);
+    if (bytes == null || !mounted) return;
+    final path = await editBusinessImage(
+      context,
+      bytes: bytes,
+      kind: _imageKindFor(type),
+      businessName: BusinessSettings.profile.value['name'] ?? '',
+    );
+    if (path == null || !mounted) return;
+    setState(() {
+      if (type == 'logo') _logoPath = path;
+      if (type == 'signature') _signaturePath = path;
+      if (type == 'qr') _qrPath = path;
+    });
+  }
+
+  void _removeImage(String type) => setState(() {
+    if (type == 'logo') _logoPath = '';
+    if (type == 'signature') _signaturePath = '';
+    if (type == 'qr') _qrPath = '';
+  });
+
+  Widget _brandingTiles() => Row(
+    children: [
+      for (final (type, label) in const [
+        ('logo', 'Logo'),
+        ('signature', 'Signature'),
+        ('qr', 'Payment QR'),
+      ]) ...[
+        if (type != 'logo') const SizedBox(width: 10),
+        Expanded(
+          child: BusinessImageTile(
+            label: label,
+            path: switch (type) {
+              'logo' => _logoPath,
+              'signature' => _signaturePath,
+              _ => _qrPath,
+            },
+            onUpload: () => _pickImage(type),
+            onEdit: () => _editImage(type),
+            onDraw: type == 'signature' ? _drawSignature : null,
+            onRemove: () => _removeImage(type),
+          ),
+        ),
+      ],
+    ],
+  );
 
   Future<void> _drawSignature() async {
     final path = await showDialog<String>(
@@ -5193,8 +5129,6 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
       'pan': _panController.text.trim().toUpperCase(),
       'gstRegistrationType': _gstRegistrationType,
       'businessState': _stateController.text.trim(),
-      'placeOfSupply': _placeOfSupplyController.text.trim(),
-      'financialYear': _financialYearController.text.trim(),
       'invoicePrefix': _invoicePrefixController.text.trim().toUpperCase(),
       'quotationPrefix': _quotationPrefixController.text.trim().toUpperCase(),
       'invoiceTheme': _invoiceTheme,
@@ -5275,21 +5209,6 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                Text(
-                  'Appearance',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 12),
-                ValueListenableBuilder<ThemeMode>(
-                  valueListenable: BusinessSettings.themeMode,
-                  builder: (context, mode, _) => ThemeModeToggle(
-                    mode: mode,
-                    onChanged: BusinessSettings.setThemeMode,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const AppLockSetting(),
-                const SizedBox(height: 24),
                 Text(
                   'Invoice colours',
                   style: Theme.of(context).textTheme.titleLarge,
@@ -5414,6 +5333,10 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
                     );
                   },
                 ),
+                _PrefixLengthWarning([
+                  _invoicePrefixController,
+                  _quotationPrefixController,
+                ]),
                 const SizedBox(height: 12),
                 _profileField(
                   _emailController,
@@ -5487,38 +5410,6 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
                   validator: (value) => value == null ? 'Select a state' : null,
                 ),
                 const SizedBox(height: 12),
-                SearchableStateField(
-                  initialValue:
-                      _indianStatesAndUnionTerritories.contains(
-                        _placeOfSupplyController.text,
-                      )
-                      ? _placeOfSupplyController.text
-                      : null,
-                  isExpanded: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Default place of supply',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: _indianStatesAndUnionTerritories
-                      .map(
-                        (state) =>
-                            DropdownMenuItem(value: state, child: Text(state)),
-                      )
-                      .toList(),
-                  onChanged: (value) =>
-                      _placeOfSupplyController.text = value ?? '',
-                  validator: (value) => value == null ? 'Select a state' : null,
-                ),
-                const SizedBox(height: 12),
-                _profileField(
-                  _financialYearController,
-                  'Financial year (example: 2026-27)',
-                  validator: (value) =>
-                      RegExp(r'^20[0-9]{2}-[0-9]{2}$').hasMatch(value.trim())
-                      ? null
-                      : 'Use format 2026-27',
-                ),
-                const SizedBox(height: 12),
                 LayoutBuilder(
                   builder: (context, constraints) {
                     final fields = [
@@ -5557,30 +5448,11 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 8),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: [
-                    _imageControl('Logo', _logoPath, () => _pickImage('logo')),
-                    _imageControl(
-                      'Signature',
-                      _signaturePath,
-                      () => _pickImage('signature'),
-                    ),
-                    _imageControl(
-                      'Payment QR',
-                      _qrPath,
-                      () => _pickImage('qr'),
-                    ),
-                  ],
-                ),
-                Align(
-                  alignment: Alignment.center,
-                  child: TextButton.icon(
-                    onPressed: _drawSignature,
-                    icon: const Icon(Icons.draw_outlined),
-                    label: const Text('Draw signature'),
-                  ),
+                _brandingTiles(),
+                const SizedBox(height: 6),
+                Text(
+                  'Tap a tile to upload, crop, draw or remove.',
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
                 const SizedBox(height: 12),
                 _profileField(
@@ -5805,6 +5677,31 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 28),
+                const Divider(),
+                const SizedBox(height: 16),
+                Text(
+                  'App preferences',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'These apply to this device only.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 12),
+                Text('Theme', style: Theme.of(context).textTheme.bodyMedium),
+                const SizedBox(height: 8),
+                ValueListenableBuilder<ThemeMode>(
+                  valueListenable: BusinessSettings.themeMode,
+                  builder: (context, mode, _) => ThemeModeToggle(
+                    mode: mode,
+                    onChanged: BusinessSettings.setThemeMode,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const AppLockSetting(),
+                const SizedBox(height: 24),
               ],
             ),
           );
@@ -5834,32 +5731,6 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
       border: const OutlineInputBorder(),
     ),
   );
-
-  Widget _imageControl(String label, String path, VoidCallback onPick) =>
-      Expanded(
-        child: InkWell(
-          onTap: onPick,
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
-            height: 100,
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey.shade400),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Column(
-              children: [
-                Expanded(
-                  child: localFileExists(path)
-                      ? ColoredBox(color: Colors.white, child: localImage(path))
-                      : const Icon(Icons.add_photo_alternate_outlined),
-                ),
-                Text(label, overflow: TextOverflow.ellipsis),
-              ],
-            ),
-          ),
-        ),
-      );
 }
 
 class AddProductPage extends StatefulWidget {
@@ -5879,7 +5750,10 @@ class AddProductPage extends StatefulWidget {
 }
 
 class PaymentsPage extends StatefulWidget {
-  const PaymentsPage({super.key});
+  const PaymentsPage({super.key, this.initialInvoiceId});
+
+  /// Pre-selects this invoice, e.g. from the Invoice view.
+  final String? initialInvoiceId;
 
   @override
   State<PaymentsPage> createState() => _PaymentsPageState();
@@ -5928,7 +5802,17 @@ class _PaymentsPageState extends State<PaymentsPage> {
           .gt('balance_amount', 0)
           .order('invoice_date', ascending: false);
       if (mounted) {
-        setState(() => _invoices = List<Map<String, dynamic>>.from(rows));
+        setState(() {
+          _invoices = List<Map<String, dynamic>>.from(rows);
+          final initial = widget.initialInvoiceId;
+          if (_invoiceId == null &&
+              initial != null &&
+              _invoices.any(
+                (invoice) => invoice['id']?.toString() == initial,
+              )) {
+            _invoiceId = initial;
+          }
+        });
         if (syncedPayments > 0) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -6127,7 +6011,7 @@ class _ReportsPageState extends State<ReportsPage> {
   double _amount(dynamic value) => value is num
       ? value.toDouble()
       : double.tryParse(value?.toString() ?? '') ?? 0;
-  String _money(double value) => '₹${value.toStringAsFixed(2)}';
+  String _money(double amount) => rupees(amount);
 
   DateTime? _invoiceDate(Map<String, dynamic> invoice) =>
       DateTime.tryParse(invoice['invoice_date']?.toString() ?? '');
@@ -7228,78 +7112,69 @@ class _QuotationsPageState extends State<QuotationsPage> {
               itemBuilder: (_, index) {
                 final quote = _quotations[index];
                 final status = quote['status']?.toString() ?? 'draft';
-                return Card(
-                  child: ListTile(
-                    leading: CircleAvatar(
-                      child: Icon(
-                        quote['converted_invoice_id'] == null
-                            ? Icons.description_outlined
-                            : Icons.receipt_long_outlined,
+                final readOnly = BusinessAccess.readOnly;
+                return _DocumentRow(
+                  title: quote['customer_name']?.toString() ?? '',
+                  number: quote['quotation_number']?.toString() ?? 'Quotation',
+                  date: parseStoredDate(quote['quotation_date']),
+                  amount: (quote['total_amount'] as num?)?.toDouble() ?? 0,
+                  status: quote['converted_invoice_id'] == null
+                      ? status
+                      : 'converted',
+                  onTap: () => _openPreview(quote),
+                  menu: PopupMenuButton<String>(
+                    tooltip: 'Quotation actions',
+                    onSelected: (value) {
+                      if (value == 'preview') {
+                        _openPreview(quote);
+                      } else if (value == 'edit') {
+                        _editQuotation(quote);
+                      } else if (value == 'duplicate') {
+                        _duplicateQuotation(quote);
+                      } else if (value == 'convert') {
+                        _convertToInvoice(quote);
+                      } else {
+                        _updateStatus(quote, value);
+                      }
+                    },
+                    itemBuilder: (_) => [
+                      const PopupMenuItem(
+                        value: 'preview',
+                        child: Text('Preview'),
                       ),
-                    ),
-                    title: Text(
-                      quote['quotation_number']?.toString() ?? 'Quotation',
-                    ),
-                    subtitle: Text(
-                      '${quote['customer_name'] ?? ''}\n${status.toUpperCase()} • Valid until ${quote['valid_until'] ?? '-'}',
-                    ),
-                    isThreeLine: true,
-                    onTap: () => _openPreview(quote),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          tooltip: 'Edit quotation',
-                          onPressed: () => _editQuotation(quote),
-                          icon: const Icon(Icons.edit_outlined),
+                      if (!readOnly) ...const [
+                        PopupMenuItem(
+                          value: 'edit',
+                          child: Text('Edit quotation'),
                         ),
-                        PopupMenuButton<String>(
-                          onSelected: (value) {
-                            if (value == 'edit') {
-                              _editQuotation(quote);
-                            } else if (value == 'duplicate') {
-                              _duplicateQuotation(quote);
-                            } else if (value == 'convert') {
-                              _convertToInvoice(quote);
-                            } else {
-                              _updateStatus(quote, value);
-                            }
-                          },
-                          itemBuilder: (_) => [
-                            const PopupMenuItem(
-                              value: 'edit',
-                              child: Text('Edit quotation'),
-                            ),
-                            const PopupMenuItem(
-                              value: 'duplicate',
-                              child: Text('Duplicate quotation'),
-                            ),
-                            const PopupMenuDivider(),
-                            const PopupMenuItem(
-                              value: 'sent',
-                              child: Text('Mark as sent'),
-                            ),
-                            const PopupMenuItem(
-                              value: 'accepted',
-                              child: Text('Mark as accepted'),
-                            ),
-                            const PopupMenuItem(
-                              value: 'rejected',
-                              child: Text('Mark as rejected'),
-                            ),
-                            const PopupMenuItem(
-                              value: 'expired',
-                              child: Text('Mark as expired'),
-                            ),
-                            const PopupMenuDivider(),
-                            const PopupMenuItem(
-                              value: 'convert',
-                              child: Text('Convert to invoice'),
-                            ),
-                          ],
+                        PopupMenuItem(
+                          value: 'duplicate',
+                          child: Text('Duplicate quotation'),
+                        ),
+                        PopupMenuDivider(),
+                        PopupMenuItem(
+                          value: 'sent',
+                          child: Text('Mark as sent'),
+                        ),
+                        PopupMenuItem(
+                          value: 'accepted',
+                          child: Text('Mark as accepted'),
+                        ),
+                        PopupMenuItem(
+                          value: 'rejected',
+                          child: Text('Mark as rejected'),
+                        ),
+                        PopupMenuItem(
+                          value: 'expired',
+                          child: Text('Mark as expired'),
+                        ),
+                        PopupMenuDivider(),
+                        PopupMenuItem(
+                          value: 'convert',
+                          child: Text('Convert to invoice'),
                         ),
                       ],
-                    ),
+                    ],
                   ),
                 );
               },
@@ -7328,12 +7203,19 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
   final _formKey = GlobalKey<FormState>();
   final _customerController = TextEditingController();
   final _placeOfSupplyController = TextEditingController(
-    text: BusinessSettings.profile.value['placeOfSupply'] ?? '',
+    text: BusinessSettings.profile.value['businessState'] ?? '',
   );
   final _termsController = TextEditingController(
     text: BusinessSettings.quotationTerms.value,
   );
-  final List<InvoiceLineItem> _items = [InvoiceLineItem()];
+  final List<InvoiceLineItem> _items = [
+    InvoiceLineItem(gstApplies: BusinessSettings.isGstRegistered.value),
+  ];
+
+  /// GST applies to this document: always for a registered business, and for
+  /// an existing document saved with tax, so that tax is kept on edit.
+  bool _usesGst = BusinessSettings.isGstRegistered.value;
+  InvoiceLineItem _newItem() => InvoiceLineItem(gstApplies: _usesGst);
   late DateTime _quotationDate;
   late DateTime _validUntil;
   bool _saving = false;
@@ -7367,17 +7249,17 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
             .limit(500),
       );
 
-  Future<List<Map<String, dynamic>>> _loadProductOptions() async =>
-      List<Map<String, dynamic>>.from(
-        await Supabase.instance.client
-            .from('products')
-            .select(
-              'id, name, product_type, sku, selling_price, uqc_code, gst_rate',
-            )
-            .eq('is_active', true)
-            .order('name')
-            .limit(500),
-      );
+  Future<List<Map<String, dynamic>>>
+  _loadProductOptions() async => List<Map<String, dynamic>>.from(
+    await Supabase.instance.client
+        .from('products')
+        .select(
+          'id, name, product_type, sku, selling_price, uqc_code, gst_rate, hsn_sac_code',
+        )
+        .eq('is_active', true)
+        .order('name')
+        .limit(500),
+  );
 
   void _selectQuotationCustomer(Map<String, dynamic> selected) {
     setState(() {
@@ -7396,6 +7278,7 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
     setState(() {
       item.productId = selected['id']?.toString();
       item.uqcCode = selected['uqc_code']?.toString();
+      item.readProduct(selected);
       item.productController.text = selected['name']?.toString() ?? '';
       item.rateController.text = selected['selling_price']?.toString() ?? '';
       item.gstRateController.text = selected['gst_rate']?.toString() ?? '0';
@@ -7417,7 +7300,10 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
   double get _subtotal =>
       _items.fold(0, (sum, item) => sum + item.taxableAmount);
   double get _tax => _items.fold(0, (sum, item) => sum + item.taxAmount);
-  double get _total => _subtotal + _tax;
+  double get _exactTotal => _subtotal + _tax;
+
+  /// Rounded to the nearest rupee; the difference shows as Round off.
+  double get _total => roundToRupee(_exactTotal);
   bool get _isIntraState =>
       _normaliseState(_placeOfSupplyController.text) ==
       _normaliseState(BusinessSettings.profile.value['businessState'] ?? '');
@@ -7436,7 +7322,7 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
       _termsController.text = quotation['terms']?.toString() ?? '';
       _placeOfSupplyController.text =
           quotation['place_of_supply']?.toString() ??
-          BusinessSettings.profile.value['placeOfSupply'] ??
+          BusinessSettings.profile.value['businessState'] ??
           '';
       final originalDate =
           DateTime.tryParse(quotation['quotation_date']?.toString() ?? '') ??
@@ -7451,16 +7337,24 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
       final rows = await Supabase.instance.client
           .from('quotation_items')
           .select(
-            'product_id, item_name, quantity, uqc_code, unit_price, gst_rate',
+            'product_id, item_name, quantity, uqc_code, unit_price, gst_rate, products(hsn_sac_code, sku)',
           )
           .eq('quotation_id', quotation['id']);
+      if (!widget.duplicate) {
+        _usesGst =
+            BusinessSettings.isGstRegistered.value ||
+            List<Map<String, dynamic>>.from(
+              rows,
+            ).any((row) => _asDouble(row['gst_rate']) > 0);
+      }
       for (final item in _items) {
         item.dispose();
       }
       _items.clear();
       for (final row in List<Map<String, dynamic>>.from(rows)) {
-        final item = InvoiceLineItem();
+        final item = _newItem();
         item.productId = row['product_id']?.toString();
+        item.readProduct(row['products'] as Map<String, dynamic>?);
         item.uqcCode = row['uqc_code']?.toString();
         item.productController.text = row['item_name']?.toString() ?? '';
         item.quantityController.text = _asDouble(row['quantity']).toString();
@@ -7468,7 +7362,7 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
         item.gstRateController.text = _asDouble(row['gst_rate']).toString();
         _items.add(item);
       }
-      if (_items.isEmpty) _items.add(InvoiceLineItem());
+      if (_items.isEmpty) _items.add(_newItem());
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -7550,8 +7444,7 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
                           BusinessSettings.profile.value['quotationPrefix'] ??
                           'QTN',
                       'p_quotation_date': _dbDate(_quotationDate),
-                      'p_financial_year':
-                          BusinessSettings.profile.value['financialYear'] ?? '',
+                      'p_financial_year': '',
                     },
                   )
                   as String;
@@ -7680,7 +7573,7 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
         await Supabase.instance.client
             .from('products')
             .select(
-              'id, name, product_type, sku, selling_price, uqc_code, gst_rate',
+              'id, name, product_type, sku, selling_price, uqc_code, gst_rate, hsn_sac_code',
             )
             .eq('is_active', true)
             .order('name')
@@ -7705,6 +7598,7 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
         setState(() {
           item.productId = selected['id']?.toString();
           item.uqcCode = selected['uqc_code']?.toString();
+          item.readProduct(selected);
           item.productController.text = selected['name']?.toString() ?? '';
           item.rateController.text =
               selected['selling_price']?.toString() ?? '';
@@ -7829,8 +7723,7 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
                     ),
                     const Spacer(),
                     IconButton.filledTonal(
-                      onPressed: () =>
-                          setState(() => _items.add(InvoiceLineItem())),
+                      onPressed: () => setState(() => _items.add(_newItem())),
                       icon: const Icon(Icons.add),
                     ),
                   ],
@@ -7838,8 +7731,7 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
                 const SizedBox(height: 8),
                 ...List.generate(_items.length, _itemRow),
                 OutlinedButton.icon(
-                  onPressed: () =>
-                      setState(() => _items.add(InvoiceLineItem())),
+                  onPressed: () => setState(() => _items.add(_newItem())),
                   icon: const Icon(Icons.add),
                   label: const Text('Add another item'),
                 ),
@@ -7851,11 +7743,14 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
                       children: [
                         _totalLine('Subtotal', _subtotal),
                         const SizedBox(height: 8),
-                        if (_isIntraState) ...[
-                          _totalLine('CGST', _cgst),
-                          _totalLine('SGST', _sgst),
-                        ] else
-                          _totalLine('IGST', _igst),
+                        if (_usesGst)
+                          if (_isIntraState) ...[
+                            _totalLine('CGST', _cgst),
+                            _totalLine('SGST', _sgst),
+                          ] else
+                            _totalLine('IGST', _igst),
+                        if (roundOffFor(_exactTotal) != 0)
+                          _totalLine('Round off', roundOffFor(_exactTotal)),
                         const Divider(height: 24),
                         _totalLine('Quotation total', _total, emphasis: true),
                       ],
@@ -7962,29 +7857,31 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: item.gstRateController,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
+            if (_usesGst) ...[
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: item.gstRateController,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(
+                  labelText: 'GST rate (%)',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) {
+                  final rate = double.tryParse(value?.trim() ?? '');
+                  return rate == null || rate < 0 || rate > 100
+                      ? 'Enter 0 to 100'
+                      : null;
+                },
               ),
-              onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                labelText: 'GST rate (%)',
-                border: OutlineInputBorder(),
-              ),
-              validator: (value) {
-                final rate = double.tryParse(value?.trim() ?? '');
-                return rate == null || rate < 0 || rate > 100
-                    ? 'Enter 0 to 100'
-                    : null;
-              },
-            ),
+            ],
             const SizedBox(height: 12),
             Align(
               alignment: Alignment.centerRight,
               child: Text(
-                'Row total: ₹${item.total.toStringAsFixed(2)}',
+                'Row total: ${rupees(item.total)}',
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
             ),
@@ -8023,7 +7920,7 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
           ),
           const Spacer(),
           Text(
-            '₹${amount.toStringAsFixed(2)}',
+            rupees(amount),
             style: TextStyle(
               fontSize: emphasis ? 18 : 14,
               fontWeight: FontWeight.bold,
@@ -8047,6 +7944,8 @@ class _QuotationPreviewPageState extends State<QuotationPreviewPage> {
   String? _error;
   String _customerPhone = '';
   String _customerEmail = '';
+  String _customerAddress = '';
+  String _customerGstin = '';
 
   @override
   void initState() {
@@ -8059,11 +7958,15 @@ class _QuotationPreviewPageState extends State<QuotationPreviewPage> {
       final results = await Future.wait([
         Supabase.instance.client
             .from('quotation_items')
-            .select('item_name, quantity, unit_price, gst_rate, total_amount')
+            .select(
+              'item_name, quantity, uqc_code, unit_price, gst_rate, '
+              'taxable_amount, tax_amount, total_amount, '
+              'products(hsn_sac_code, sku)',
+            )
             .eq('quotation_id', widget.quotation['id']),
         Supabase.instance.client
             .from('customers')
-            .select('phone, email')
+            .select('phone, email, address, gstin')
             .eq('name', widget.quotation['customer_name'])
             .limit(1),
       ]);
@@ -8074,6 +7977,8 @@ class _QuotationPreviewPageState extends State<QuotationPreviewPage> {
           if (contacts.isNotEmpty) {
             _customerPhone = contacts.first['phone']?.toString() ?? '';
             _customerEmail = contacts.first['email']?.toString() ?? '';
+            _customerAddress = contacts.first['address']?.toString() ?? '';
+            _customerGstin = contacts.first['gstin']?.toString() ?? '';
           }
         });
       }
@@ -8085,136 +7990,49 @@ class _QuotationPreviewPageState extends State<QuotationPreviewPage> {
   double _amount(dynamic value) => value is num
       ? value.toDouble()
       : double.tryParse(value?.toString() ?? '') ?? 0;
-  String _date(dynamic value) => value?.toString().isEmpty != false
-      ? '-'
-      : value.toString().split('T').first;
 
-  Future<Uint8List> _pdf(PdfPageFormat format) async {
-    final profile = BusinessSettings.profile.value;
-    final paymentQr = await buildPaymentQr(profile);
-    final signature = await loadPdfSignature(profile['signaturePath']);
-    final pdf = pw.Document();
-    pdf.addPage(
-      pw.MultiPage(
-        pageFormat: format,
-        margin: const pw.EdgeInsets.all(28),
-        build: (_) => [
-          pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.Text(
-                    profile['name']?.isNotEmpty == true
-                        ? profile['name']!
-                        : 'Your Business Name',
-                    style: pw.TextStyle(
-                      fontSize: 18,
-                      fontWeight: pw.FontWeight.bold,
-                    ),
-                  ),
-                  if (profile['address']?.isNotEmpty == true)
-                    pw.Text(profile['address']!),
-                  if (profile['phone']?.isNotEmpty == true)
-                    pw.Text('Phone: ${profile['phone']}'),
-                  if (profile['gstin']?.isNotEmpty == true)
-                    pw.Text('GSTIN: ${profile['gstin']}'),
-                ],
-              ),
-              pw.Text(
-                'QUOTATION',
-                style: pw.TextStyle(
-                  fontSize: 18,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-          pw.SizedBox(height: 18),
-          pw.Container(
-            padding: const pw.EdgeInsets.all(10),
-            color: PdfColors.grey100,
-            child: pw.Row(
-              children: [
-                pw.Expanded(
-                  child: pw.Text(
-                    'Quote to\n${widget.quotation['customer_name'] ?? ''}',
-                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-                  ),
-                ),
-                pw.Expanded(
-                  child: pw.Text(
-                    'Quotation no.: ${widget.quotation['quotation_number'] ?? ''}\nDate: ${_date(widget.quotation['quotation_date'])}\nValid until: ${_date(widget.quotation['valid_until'])}',
-                  ),
-                ),
-              ],
-            ),
-          ),
-          pw.SizedBox(height: 16),
-          pw.TableHelper.fromTextArray(
-            headers: const ['#', 'Description', 'Qty', 'Rate', 'GST', 'Amount'],
-            headerStyle: pw.TextStyle(
-              fontWeight: pw.FontWeight.bold,
-              color: PdfColors.white,
-            ),
-            headerDecoration: const pw.BoxDecoration(color: PdfColors.indigo),
-            data: List.generate(_items.length, (index) {
-              final item = _items[index];
-              return [
-                '${index + 1}',
-                item['item_name']?.toString() ?? '',
-                _amount(item['quantity']).toStringAsFixed(2),
-                'Rs. ${_amount(item['unit_price']).toStringAsFixed(2)}',
-                '${_amount(item['gst_rate']).toStringAsFixed(0)}%',
-                'Rs. ${_amount(item['total_amount']).toStringAsFixed(2)}',
-              ];
-            }),
-          ),
-          pw.SizedBox(height: 14),
-          pw.Align(
-            alignment: pw.Alignment.centerRight,
-            child: pw.Text(
-              'Quotation total: Rs. ${_amount(widget.quotation['total_amount']).toStringAsFixed(2)}',
-              style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
-            ),
-          ),
-          pw.SizedBox(height: 10),
-          pw.Text(
-            'Amount in words: ${amountInWords(_amount(widget.quotation['total_amount']))}',
-          ),
-          if ((widget.quotation['terms']?.toString() ?? '')
-              .trim()
-              .isNotEmpty) ...[
-            pw.SizedBox(height: 20),
-            pw.Text(
-              'Terms and conditions',
-              style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-            ),
-            pw.Text(widget.quotation['terms'].toString()),
-          ],
-          pw.SizedBox(height: 24),
-          pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: pw.CrossAxisAlignment.end,
-            children: [
-              paymentQr ?? pw.SizedBox(),
-              pdfSignatureBlock(signature),
-            ],
-          ),
-          pw.SizedBox(height: 28),
-          pw.Align(
-            alignment: pw.Alignment.center,
-            child: pw.Text(
-              'This is a computer-generated quotation.',
-              style: const pw.TextStyle(fontSize: 8),
-            ),
-          ),
-        ],
+  Future<Uint8List> _pdf(PdfPageFormat format) {
+    final quotation = widget.quotation;
+    final items = [
+      for (final row in _items)
+        PdfLineItem(
+          description: row['item_name']?.toString() ?? '',
+          note: () {
+            final sku = (row['products'] as Map?)?['sku']?.toString() ?? '';
+            return sku.trim().isEmpty ? '' : 'SKU: ${sku.trim()}';
+          }(),
+          hsn: (row['products'] as Map?)?['hsn_sac_code']?.toString() ?? '',
+          quantity: _amount(row['quantity']),
+          unit: row['uqc_code']?.toString() ?? '',
+          rate: _amount(row['unit_price']),
+          gstRate: _amount(row['gst_rate']),
+          taxable: row['taxable_amount'] == null
+              ? _amount(row['quantity']) * _amount(row['unit_price'])
+              : _amount(row['taxable_amount']),
+          tax: _amount(row['tax_amount']),
+        ),
+    ];
+    final hasTax = items.any((item) => item.tax > 0);
+    final gst = BusinessSettings.isGstRegistered.value || hasTax;
+    return buildDocumentPdf(
+      PdfDocumentData(
+        kind: PdfDocumentKind.quotation,
+        number: quotation['quotation_number']?.toString() ?? '',
+        date: parseStoredDate(quotation['quotation_date']) ?? DateTime.now(),
+        secondDate: parseStoredDate(quotation['valid_until']),
+        placeOfSupply: quotation['place_of_supply']?.toString() ?? '',
+        customerName: quotation['customer_name']?.toString() ?? '',
+        customerAddress: _customerAddress,
+        customerGstin: gst ? _customerGstin : '',
+        customerPhone: _customerPhone,
+        items: items,
+        total: _amount(quotation['total_amount']),
+        terms: quotation['terms']?.toString() ?? '',
+        gstDocument: gst,
       ),
+      BusinessSettings.profile.value,
+      format: format,
     );
-    return pdf.save();
   }
 
   Future<void> _share() async {
@@ -8423,6 +8241,15 @@ class _InvoiceHistoryPageState extends State<InvoiceHistoryPage> {
     await _loadInvoices();
   }
 
+  Future<void> _openInvoice(Map<String, dynamic> invoice) async {
+    final id = invoice['id']?.toString();
+    if (id == null) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => InvoiceViewPage(invoiceId: id)),
+    );
+    if (mounted) await _loadInvoices();
+  }
+
   Future<void> _duplicateInvoice(Map<String, dynamic> invoice) async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -8499,32 +8326,31 @@ class _InvoiceHistoryPageState extends State<InvoiceHistoryPage> {
               itemBuilder: (_, index) {
                 final invoice = _invoices[index];
                 final status = invoice['status']?.toString() ?? 'draft';
-                return Card(
-                  child: ListTile(
-                    leading: CircleAvatar(
-                      child: Icon(
-                        status == 'paid'
-                            ? Icons.check
-                            : Icons.receipt_long_outlined,
+                final readOnly = BusinessAccess.readOnly;
+                return _DocumentRow(
+                  title: invoice['customer_name']?.toString() ?? '',
+                  number: invoice['invoice_number']?.toString() ?? 'Invoice',
+                  date: parseStoredDate(invoice['invoice_date']),
+                  amount: (invoice['total_amount'] as num?)?.toDouble() ?? 0,
+                  status: status,
+                  onTap: () => _openInvoice(invoice),
+                  menu: PopupMenuButton<String>(
+                    tooltip: 'Invoice actions',
+                    onSelected: (value) {
+                      if (value == 'preview') {
+                        _openInvoice(invoice);
+                      } else if (value == 'edit') {
+                        _editInvoice(invoice);
+                      } else if (value == 'duplicate') {
+                        _duplicateInvoice(invoice);
+                      }
+                    },
+                    itemBuilder: (_) => [
+                      const PopupMenuItem(
+                        value: 'preview',
+                        child: Text('Preview'),
                       ),
-                    ),
-                    title: Text(
-                      invoice['invoice_number']?.toString() ?? 'Invoice',
-                    ),
-                    subtitle: Text(
-                      '${invoice['customer_name'] ?? ''}\n${invoice['invoice_date'] ?? ''} • ${status.toUpperCase()}',
-                    ),
-                    isThreeLine: true,
-                    trailing: PopupMenuButton<String>(
-                      tooltip: 'Invoice actions',
-                      onSelected: (value) {
-                        if (value == 'edit') {
-                          _editInvoice(invoice);
-                        } else if (value == 'duplicate') {
-                          _duplicateInvoice(invoice);
-                        }
-                      },
-                      itemBuilder: (_) => const [
+                      if (!readOnly) ...const [
                         PopupMenuItem(
                           value: 'edit',
                           child: Text('Edit invoice'),
@@ -8534,7 +8360,7 @@ class _InvoiceHistoryPageState extends State<InvoiceHistoryPage> {
                           child: Text('Duplicate invoice'),
                         ),
                       ],
-                    ),
+                    ],
                   ),
                 );
               },
@@ -8544,7 +8370,7 @@ class _InvoiceHistoryPageState extends State<InvoiceHistoryPage> {
 }
 
 class InvoiceLineItem {
-  InvoiceLineItem()
+  InvoiceLineItem({this.gstApplies = true})
     : productController = TextEditingController(),
       quantityController = TextEditingController(text: '1'),
       rateController = TextEditingController(),
@@ -8557,12 +8383,37 @@ class InvoiceLineItem {
   String? productId;
   String? uqcCode;
 
+  /// False for a business not registered under GST: no tax is charged.
+  bool gstApplies;
+  String hsn = '';
+  String sku = '';
+
   double get quantity => double.tryParse(quantityController.text.trim()) ?? 0;
   double get rate => double.tryParse(rateController.text.trim()) ?? 0;
-  double get gstRate => double.tryParse(gstRateController.text.trim()) ?? 0;
+  double get gstRate =>
+      gstApplies ? double.tryParse(gstRateController.text.trim()) ?? 0 : 0;
   double get taxableAmount => quantity * rate;
   double get taxAmount => taxableAmount * gstRate / 100;
   double get total => taxableAmount + taxAmount;
+
+  /// Fills HSN/SAC and SKU from a product row, or a row that embeds one.
+  void readProduct(Map<String, dynamic>? product) {
+    if (product == null) return;
+    hsn = product['hsn_sac_code']?.toString() ?? '';
+    sku = product['sku']?.toString() ?? '';
+  }
+
+  PdfLineItem toPdf() => PdfLineItem(
+    description: productController.text.trim(),
+    note: sku.trim().isEmpty ? '' : 'SKU: ${sku.trim()}',
+    hsn: hsn,
+    quantity: quantity,
+    unit: uqcCode ?? '',
+    rate: rate,
+    gstRate: gstRate,
+    taxable: taxableAmount,
+    tax: taxAmount,
+  );
 
   void dispose() {
     productController.dispose();
@@ -8601,14 +8452,21 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
   final _customerEmailController = TextEditingController();
   final _customerGstinController = TextEditingController();
   final _placeOfSupplyController = TextEditingController(
-    text: BusinessSettings.profile.value['placeOfSupply'] ?? '',
+    text: BusinessSettings.profile.value['businessState'] ?? '',
   );
   final _termsController = TextEditingController(
     text: BusinessSettings.invoiceTerms.value,
   );
   late DateTime _invoiceDate;
   DateTime? _dueDate;
-  final List<InvoiceLineItem> _items = [InvoiceLineItem()];
+  final List<InvoiceLineItem> _items = [
+    InvoiceLineItem(gstApplies: BusinessSettings.isGstRegistered.value),
+  ];
+
+  /// GST applies to this document: always for a registered business, and for
+  /// an existing document saved with tax, so that tax is kept on edit.
+  bool _usesGst = BusinessSettings.isGstRegistered.value;
+  InvoiceLineItem _newItem() => InvoiceLineItem(gstApplies: _usesGst);
   bool _isSavingDraft = false;
   bool _loadingSource = false;
   late final Future<List<Map<String, dynamic>>> _customerOptions;
@@ -8653,17 +8511,17 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
             .limit(500),
       );
 
-  Future<List<Map<String, dynamic>>> _loadProductOptions() async =>
-      List<Map<String, dynamic>>.from(
-        await Supabase.instance.client
-            .from('products')
-            .select(
-              'id, name, product_type, sku, selling_price, uqc_code, gst_rate',
-            )
-            .eq('is_active', true)
-            .order('name')
-            .limit(500),
-      );
+  Future<List<Map<String, dynamic>>>
+  _loadProductOptions() async => List<Map<String, dynamic>>.from(
+    await Supabase.instance.client
+        .from('products')
+        .select(
+          'id, name, product_type, sku, selling_price, uqc_code, gst_rate, hsn_sac_code',
+        )
+        .eq('is_active', true)
+        .order('name')
+        .limit(500),
+  );
 
   void _selectInvoiceCustomer(Map<String, dynamic> selected) {
     setState(() {
@@ -8709,6 +8567,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
     setState(() {
       item.productId = productId;
       item.uqcCode = selected['uqc_code']?.toString();
+      item.readProduct(selected);
       item.productController.text = selected['name']?.toString() ?? '';
       final suggestedPrice = lastSellingPrice ?? catalogPrice;
       if (suggestedPrice != null) {
@@ -8743,7 +8602,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
           source['customer_gstin']?.toString() ?? '';
       _placeOfSupplyController.text =
           source['place_of_supply']?.toString() ??
-          BusinessSettings.profile.value['placeOfSupply'] ??
+          BusinessSettings.profile.value['businessState'] ??
           '';
       _termsController.text =
           source['terms']?.toString() ?? BusinessSettings.invoiceTerms.value;
@@ -8756,16 +8615,24 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
       final rows = await Supabase.instance.client
           .from('invoice_items')
           .select(
-            'product_id, item_name, quantity, uqc_code, unit_price, gst_rate',
+            'product_id, item_name, quantity, uqc_code, unit_price, gst_rate, products(hsn_sac_code, sku)',
           )
           .eq('invoice_id', source['id']);
+      if (_isEditing) {
+        _usesGst =
+            BusinessSettings.isGstRegistered.value ||
+            List<Map<String, dynamic>>.from(
+              rows,
+            ).any((row) => (num.tryParse('${row['gst_rate']}') ?? 0) > 0);
+      }
       for (final item in _items) {
         item.dispose();
       }
       _items.clear();
       for (final row in List<Map<String, dynamic>>.from(rows)) {
-        final item = InvoiceLineItem();
+        final item = _newItem();
         item.productId = row['product_id']?.toString();
+        item.readProduct(row['products'] as Map<String, dynamic>?);
         item.uqcCode = row['uqc_code']?.toString();
         item.productController.text = row['item_name']?.toString() ?? '';
         item.quantityController.text = row['quantity']?.toString() ?? '1';
@@ -8773,7 +8640,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
         item.gstRateController.text = row['gst_rate']?.toString() ?? '0';
         _items.add(item);
       }
-      if (_items.isEmpty) _items.add(InvoiceLineItem());
+      if (_items.isEmpty) _items.add(_newItem());
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -8808,7 +8675,10 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
   double get _subtotal =>
       _items.fold(0, (sum, item) => sum + item.taxableAmount);
   double get _taxTotal => _items.fold(0, (sum, item) => sum + item.taxAmount);
-  double get _grandTotal => _subtotal + _taxTotal;
+  double get _exactTotal => _subtotal + _taxTotal;
+
+  /// Rounded to the nearest rupee; the difference shows as Round off.
+  double get _grandTotal => roundToRupee(_exactTotal);
   bool get _isIntraState =>
       _normaliseState(_placeOfSupplyController.text) ==
       _normaliseState(BusinessSettings.profile.value['businessState'] ?? '');
@@ -8829,7 +8699,9 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
   Map<String, dynamic> _invoiceHeaderPayload() => {
     'invoice_number': _numberController.text.trim().toUpperCase(),
     'customer_name': _customerController.text.trim(),
-    'customer_gstin': _customerGstinController.text.trim().toUpperCase(),
+    'customer_gstin': _usesGst
+        ? _customerGstinController.text.trim().toUpperCase()
+        : '',
     'invoice_date': _dateForDatabase(_invoiceDate),
     'due_date': _dueDate == null ? null : _dateForDatabase(_dueDate!),
     'subtotal': _subtotal,
@@ -8956,9 +8828,11 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                             0))
                     .clamp(0, double.infinity)
                     .toDouble(),
+            total: _grandTotal,
+            gstDocument: _usesGst,
             customerName: _customerController.text.trim(),
             customerAddress: _customerAddress,
-            customerGstin: _customerGstinController.text.trim(),
+            customerGstin: _usesGst ? _customerGstinController.text.trim() : '',
             customerPhone: _customerPhoneController.text.trim(),
             customerEmail: _customerEmailController.text.trim(),
             placeOfSupply: _placeOfSupplyController.text.trim(),
@@ -9078,7 +8952,9 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
     try {
       final rows = await Supabase.instance.client
           .from('products')
-          .select('id, name, product_type, selling_price, uqc_code, gst_rate')
+          .select(
+            'id, name, product_type, sku, selling_price, uqc_code, gst_rate, hsn_sac_code',
+          )
           .eq('is_active', true)
           .order('name')
           .limit(100);
@@ -9138,6 +9014,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
       setState(() {
         item.productId = productId;
         item.uqcCode = selected['uqc_code']?.toString();
+        item.readProduct(selected);
         item.productController.text = selected['name']?.toString() ?? '';
         final suggestedPrice = lastSellingPrice ?? catalogPrice;
         if (suggestedPrice != null) {
@@ -9166,7 +9043,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
     }
   }
 
-  void _addItem() => setState(() => _items.add(InvoiceLineItem()));
+  void _addItem() => setState(() => _items.add(_newItem()));
 
   void _removeItem(int index) {
     if (_items.length == 1) return;
@@ -9245,32 +9122,34 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                       label: const Text('Add new customer'),
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _customerGstinController,
-                    textCapitalization: TextCapitalization.characters,
-                    inputFormatters: [
-                      TextInputFormatter.withFunction(
-                        (_, value) =>
-                            value.copyWith(text: value.text.toUpperCase()),
+                  if (_usesGst) ...[
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _customerGstinController,
+                      textCapitalization: TextCapitalization.characters,
+                      inputFormatters: [
+                        TextInputFormatter.withFunction(
+                          (_, value) =>
+                              value.copyWith(text: value.text.toUpperCase()),
+                        ),
+                      ],
+                      decoration: const InputDecoration(
+                        labelText: 'Customer GSTIN (optional)',
+                        helperText:
+                            'Required for classification as a B2B supply.',
+                        border: OutlineInputBorder(),
                       ),
-                    ],
-                    decoration: const InputDecoration(
-                      labelText: 'Customer GSTIN (optional)',
-                      helperText:
-                          'Required for classification as a B2B supply.',
-                      border: OutlineInputBorder(),
+                      validator: (value) {
+                        final gstin = value?.trim().toUpperCase() ?? '';
+                        return gstin.isEmpty ||
+                                RegExp(
+                                  r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$',
+                                ).hasMatch(gstin)
+                            ? null
+                            : 'Enter a valid GSTIN';
+                      },
                     ),
-                    validator: (value) {
-                      final gstin = value?.trim().toUpperCase() ?? '';
-                      return gstin.isEmpty ||
-                              RegExp(
-                                r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$',
-                              ).hasMatch(gstin)
-                          ? null
-                          : 'Enter a valid GSTIN';
-                    },
-                  ),
+                  ],
                   const SizedBox(height: 12),
                   SearchableStateField(
                     key: ValueKey(_placeOfSupplyController.text),
@@ -9378,14 +9257,17 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                         children: [
                           _totalLine('Subtotal', _subtotal),
                           const SizedBox(height: 8),
-                          if (_isIntraState) ...[
-                            _totalLine('CGST', _cgstTotal),
-                            _totalLine('SGST', _sgstTotal),
-                          ] else
-                            _totalLine('IGST', _igstTotal),
+                          if (_usesGst)
+                            if (_isIntraState) ...[
+                              _totalLine('CGST', _cgstTotal),
+                              _totalLine('SGST', _sgstTotal),
+                            ] else
+                              _totalLine('IGST', _igstTotal),
+                          if (roundOffFor(_exactTotal) != 0)
+                            _totalLine('Round off', roundOffFor(_exactTotal)),
                           const Divider(height: 24),
                           _totalLine(
-                            'Invoice total',
+                            'Total payable',
                             _grandTotal,
                             emphasis: true,
                           ),
@@ -9500,30 +9382,32 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: item.gstRateController,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
+            if (_usesGst) ...[
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: item.gstRateController,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(
+                  labelText: 'GST rate (%)',
+                  helperText: 'Enter the rate manually.',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) {
+                  final rate = double.tryParse(value?.trim() ?? '');
+                  return rate == null || rate < 0 || rate > 100
+                      ? 'Enter a rate from 0 to 100'
+                      : null;
+                },
               ),
-              onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                labelText: 'GST rate (%)',
-                helperText: 'Enter the rate manually.',
-                border: OutlineInputBorder(),
-              ),
-              validator: (value) {
-                final rate = double.tryParse(value?.trim() ?? '');
-                return rate == null || rate < 0 || rate > 100
-                    ? 'Enter a rate from 0 to 100'
-                    : null;
-              },
-            ),
+            ],
             const SizedBox(height: 12),
             Align(
               alignment: Alignment.centerRight,
               child: Text(
-                'Row total: ₹${item.total.toStringAsFixed(2)}',
+                'Row total: ${rupees(item.total)}',
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
             ),
@@ -9565,7 +9449,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
           ),
           const Spacer(),
           Text(
-            '₹${amount.toStringAsFixed(2)}',
+            rupees(amount),
             style: TextStyle(
               fontSize: emphasis ? 18 : 14,
               fontWeight: FontWeight.bold,
@@ -9629,6 +9513,284 @@ class _SavedDocumentPreview extends StatelessWidget {
   );
 }
 
+/// What the Invoice view screen shows and can do for a saved invoice.
+class InvoiceViewActions {
+  const InvoiceViewActions({
+    required this.status,
+    required this.total,
+    required this.paid,
+    this.dueDate,
+    this.onEdit,
+    this.onDuplicate,
+    this.onRecordPayment,
+  });
+  final String status;
+  final double total;
+  final double paid;
+  final DateTime? dueDate;
+  final Future<void> Function()? onEdit;
+  final Future<void> Function()? onDuplicate;
+  final Future<void> Function()? onRecordPayment;
+  double get balance => total - paid < 0 ? 0 : total - paid;
+}
+
+/// Opens a saved invoice by id: its PDF, payment summary and every action.
+class InvoiceViewPage extends StatefulWidget {
+  const InvoiceViewPage({super.key, required this.invoiceId});
+  final String invoiceId;
+
+  @override
+  State<InvoiceViewPage> createState() => _InvoiceViewPageState();
+}
+
+class _InvoiceViewPageState extends State<InvoiceViewPage> {
+  Map<String, dynamic>? _invoice;
+  List<InvoiceLineItem> _items = [];
+  Map<String, dynamic> _contact = const {};
+  String? _error;
+  int _version = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    for (final item in _items) {
+      item.dispose();
+    }
+    super.dispose();
+  }
+
+  static double _num(Object? value) =>
+      value is num ? value.toDouble() : double.tryParse('$value') ?? 0;
+
+  Future<void> _load() async {
+    final client = Supabase.instance.client;
+    try {
+      final invoice = await client
+          .from('invoices')
+          .select()
+          .eq('id', widget.invoiceId)
+          .single();
+      final results = await Future.wait([
+        client
+            .from('invoice_items')
+            .select(
+              'product_id, item_name, quantity, uqc_code, unit_price, '
+              'gst_rate, products(hsn_sac_code, sku)',
+            )
+            .eq('invoice_id', widget.invoiceId),
+        client
+            .from('customers')
+            .select('phone, email, address')
+            .eq('name', invoice['customer_name'] ?? '')
+            .limit(1),
+      ]);
+      final items = [
+        for (final row in List<Map<String, dynamic>>.from(results[0] as List))
+          InvoiceLineItem()
+            ..productId = row['product_id']?.toString()
+            ..uqcCode = row['uqc_code']?.toString()
+            ..readProduct(row['products'] as Map<String, dynamic>?)
+            ..productController.text = row['item_name']?.toString() ?? ''
+            ..quantityController.text = _num(row['quantity']).toString()
+            ..rateController.text = _num(row['unit_price']).toString()
+            ..gstRateController.text = _num(row['gst_rate']).toString(),
+      ];
+      final contacts = List<Map<String, dynamic>>.from(results[1] as List);
+      if (!mounted) {
+        for (final item in items) {
+          item.dispose();
+        }
+        return;
+      }
+      final old = _items;
+      setState(() {
+        _invoice = invoice;
+        _items = items;
+        _contact = contacts.isEmpty ? const {} : contacts.first;
+        _error = null;
+        _version++;
+      });
+      for (final item in old) {
+        item.dispose();
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _error = _connectionMessage(
+            error,
+            fallback: 'Unable to open this invoice.',
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _then(Widget page) async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => page));
+    invoiceChanges.value++;
+    if (mounted) await _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final invoice = _invoice;
+    if (invoice == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Invoice')),
+        body: Center(
+          child: _error == null
+              ? const CircularProgressIndicator()
+              : Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(_error!, textAlign: TextAlign.center),
+                      const SizedBox(height: 12),
+                      FilledButton(
+                        onPressed: _load,
+                        child: const Text('Try again'),
+                      ),
+                    ],
+                  ),
+                ),
+        ),
+      );
+    }
+    final total = _num(invoice['total_amount']);
+    final paid = _num(invoice['paid_amount']);
+    final readOnly = BusinessAccess.readOnly;
+    final gst =
+        BusinessSettings.isGstRegistered.value ||
+        (invoice['tax_type']?.toString() ?? 'none') != 'none' ||
+        _num(invoice['tax_amount']) > 0;
+    return InvoicePreviewPage(
+      key: ValueKey(_version),
+      invoiceNumber: invoice['invoice_number']?.toString() ?? 'Invoice',
+      customerName: invoice['customer_name']?.toString() ?? '',
+      customerAddress: _contact['address']?.toString() ?? '',
+      customerGstin: invoice['customer_gstin']?.toString() ?? '',
+      customerPhone: _contact['phone']?.toString() ?? '',
+      customerEmail: _contact['email']?.toString() ?? '',
+      placeOfSupply: invoice['place_of_supply']?.toString() ?? '',
+      invoiceDate: parseStoredDate(invoice['invoice_date']) ?? DateTime.now(),
+      dueDate: parseStoredDate(invoice['due_date']),
+      terms: invoice['terms']?.toString() ?? '',
+      items: _items,
+      balanceDue: _num(invoice['balance_amount']),
+      total: total,
+      paid: paid,
+      gstDocument: gst,
+      view: InvoiceViewActions(
+        status: invoice['status']?.toString() ?? 'sent',
+        total: total,
+        paid: paid,
+        dueDate: parseStoredDate(invoice['due_date']),
+        onEdit: readOnly
+            ? null
+            : () => _then(
+                InvoiceBuilderPage(sourceInvoice: invoice, editExisting: true),
+              ),
+        onDuplicate: readOnly
+            ? null
+            : () => _then(InvoiceBuilderPage(sourceInvoice: invoice)),
+        onRecordPayment: readOnly || _num(invoice['balance_amount']) <= 0
+            ? null
+            : () => _then(PaymentsPage(initialInvoiceId: widget.invoiceId)),
+      ),
+    );
+  }
+}
+
+/// One row in the invoice or quotation list, in the Home "Recent" style.
+class _DocumentRow extends StatelessWidget {
+  const _DocumentRow({
+    required this.title,
+    required this.number,
+    required this.date,
+    required this.amount,
+    required this.status,
+    required this.onTap,
+    required this.menu,
+  });
+  final String title;
+  final String number;
+  final DateTime? date;
+  final double amount;
+  final String status;
+  final VoidCallback onTap;
+  final Widget menu;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final name = title.trim();
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 4, 12),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 22,
+                backgroundColor: theme.colorScheme.primaryContainer,
+                foregroundColor: theme.colorScheme.onPrimaryContainer,
+                child: Text(
+                  name.isEmpty ? '#' : name[0].toUpperCase(),
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name.isEmpty ? 'Customer' : name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      [
+                        number,
+                        if (date != null) displayDate(date),
+                      ].join('  •  '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(rupees(amount), style: theme.textTheme.titleMedium),
+                  const SizedBox(height: 4),
+                  InvoiceStatusBadge(status),
+                ],
+              ),
+              menu,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class InvoicePreviewPage extends StatefulWidget {
   const InvoicePreviewPage({
     super.key,
@@ -9645,6 +9807,10 @@ class InvoicePreviewPage extends StatefulWidget {
     this.previewProfile,
     this.customerAddress = '',
     this.customerGstin = '',
+    this.total,
+    this.paid,
+    this.gstDocument,
+    this.view,
   });
 
   final String customerName;
@@ -9661,6 +9827,20 @@ class InvoicePreviewPage extends StatefulWidget {
   final double balanceDue;
   final Map<String, String>? previewProfile;
 
+  /// The saved total. Defaults to the items' total rounded to the rupee.
+  final double? total;
+
+  /// Amount already received. Defaults to total minus [balanceDue].
+  final double? paid;
+
+  /// Whether this is a GST document. Defaults to the business setting, or
+  /// true when any item carries tax.
+  final bool? gstDocument;
+
+  /// Set for a saved invoice opened from a list: shows its status, payment
+  /// summary and actions instead of the after-save buttons.
+  final InvoiceViewActions? view;
+
   @override
   State<InvoicePreviewPage> createState() => _InvoicePreviewPageState();
 }
@@ -9670,222 +9850,38 @@ class InvoicePdfRenderer {
   final InvoicePreviewPage widget;
   Map<String, String> get _profile =>
       widget.previewProfile ?? BusinessSettings.profile.value;
-  double get _subtotal =>
-      widget.items.fold(0, (sum, item) => sum + item.taxableAmount);
-  double get _taxTotal =>
-      widget.items.fold(0, (sum, item) => sum + item.taxAmount);
-  double get _total => _subtotal + _taxTotal;
-  bool get _isIntraState =>
-      _normaliseState(widget.placeOfSupply) ==
-      _normaliseState(_profile['businessState'] ?? '');
-  double get _cgstTotal => _isIntraState ? _taxTotal / 2 : 0;
-  double get _sgstTotal => _isIntraState ? _taxTotal / 2 : 0;
-  double get _igstTotal => _isIntraState ? 0 : _taxTotal;
 
-  String get _invoiceNumber => widget.invoiceNumber;
-  String _date(DateTime? value) => value == null
-      ? '-'
-      : '${value.day.toString().padLeft(2, '0')}/${value.month.toString().padLeft(2, '0')}/${value.year}';
-  Future<pw.MemoryImage?> _image(String? path) async {
-    final bytes = await readLocalFile(path);
-    return bytes == null ? null : pw.MemoryImage(bytes);
-  }
-
-  Future<Uint8List> build(PdfPageFormat format) async {
-    final profile = _profile;
-    final palette = InvoicePalette.resolve(profile['invoiceTheme']);
-    final logo = await _image(profile['logoPath']);
-    final signature = await loadPdfSignature(profile['signaturePath']);
-    final qr = await buildPaymentQr(profile);
-    final pdf = pw.Document();
-    pdf.addPage(
-      pw.MultiPage(
-        pageTheme: pw.PageTheme(
-          pageFormat: format,
-          margin: const pw.EdgeInsets.all(28),
-          theme: pw.ThemeData.withFont().copyWith(
-            defaultTextStyle: pw.TextStyle(color: palette.pdfInk, fontSize: 10),
-          ),
-          buildBackground: (_) => pw.FullPage(
-            ignoreMargins: true,
-            child: pw.Container(color: palette.pdfPaper),
-          ),
-        ),
-        build: (_) => [
-          pw.Row(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              if (logo != null)
-                pw.Container(
-                  width: 58,
-                  height: 58,
-                  margin: const pw.EdgeInsets.only(right: 14),
-                  child: pw.Image(logo, fit: pw.BoxFit.contain),
-                ),
-              pw.Expanded(
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Text(
-                      profile['name']?.isNotEmpty == true
-                          ? profile['name']!
-                          : 'Your Business Name',
-                      style: pw.TextStyle(
-                        fontSize: 18,
-                        fontWeight: pw.FontWeight.bold,
-                      ),
-                    ),
-                    if (profile['address']?.isNotEmpty == true)
-                      pw.Text(profile['address']!),
-                    if (profile['phone']?.isNotEmpty == true)
-                      pw.Text('Phone: ${profile['phone']}'),
-                    if (profile['email']?.isNotEmpty == true)
-                      pw.Text('Email: ${profile['email']}'),
-                    if (profile['gstin']?.isNotEmpty == true)
-                      pw.Text(
-                        'GSTIN: ${profile['gstin']}',
-                        style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-                      ),
-                  ],
-                ),
-              ),
-              pw.Text(
-                widget.previewProfile != null
-                    ? 'SAMPLE INVOICE'
-                    : (BusinessSettings.isGstRegistered.value
-                          ? 'TAX INVOICE'
-                          : 'INVOICE'),
-                style: pw.TextStyle(
-                  fontSize: 18,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-          pw.SizedBox(height: 20),
-          pw.Container(
-            padding: const pw.EdgeInsets.all(10),
-            color: palette.pdfPaper,
-            child: pw.Row(
-              children: [
-                pw.Expanded(
-                  child: pw.Text(
-                    'Bill to\n${customerBillingDetails(name: widget.customerName, address: widget.customerAddress, gstin: widget.customerGstin, phone: widget.customerPhone)}',
-                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-                  ),
-                ),
-                pw.Expanded(
-                  child: pw.Text(
-                    'Invoice no.: $_invoiceNumber\nInvoice date: ${_date(widget.invoiceDate)}\nDue date: ${_date(widget.dueDate)}\nPlace of supply: ${widget.placeOfSupply}',
-                  ),
-                ),
-              ],
-            ),
-          ),
-          pw.SizedBox(height: 16),
-          pw.TableHelper.fromTextArray(
-            headerStyle: pw.TextStyle(
-              fontWeight: pw.FontWeight.bold,
-              color: palette.pdfPaper,
-            ),
-            headerDecoration: pw.BoxDecoration(color: palette.pdfInk),
-            cellAlignment: pw.Alignment.centerLeft,
-            headers: const ['#', 'Description', 'Qty', 'Rate', 'GST', 'Amount'],
-            data: List.generate(widget.items.length, (index) {
-              final item = widget.items[index];
-              return [
-                '${index + 1}',
-                item.productController.text.trim(),
-                item.quantity.toStringAsFixed(2),
-                'Rs. ${item.rate.toStringAsFixed(2)}',
-                '${item.gstRate.toStringAsFixed(0)}%',
-                'Rs. ${item.total.toStringAsFixed(2)}',
-              ];
-            }),
-          ),
-          pw.SizedBox(height: 14),
-          pw.Align(
-            alignment: pw.Alignment.centerRight,
-            child: pw.Container(
-              width: 220,
-              child: pw.Column(
-                children: [
-                  _pdfTotal('Subtotal', _subtotal),
-                  if (_isIntraState) ...[
-                    _pdfTotal('CGST', _cgstTotal),
-                    _pdfTotal('SGST', _sgstTotal),
-                  ] else
-                    _pdfTotal('IGST', _igstTotal),
-                  pw.Divider(),
-                  _pdfTotal('Total payable', _total, bold: true),
-                ],
-              ),
-            ),
-          ),
-          pw.SizedBox(height: 10),
-          pw.Text('Amount in words: ${amountInWords(_total)}'),
-          if ((profile['bankName'] ?? '').isNotEmpty ||
-              (profile['bankAccount'] ?? '').isNotEmpty ||
-              (profile['ifsc'] ?? '').isNotEmpty ||
-              (profile['upiId'] ?? '').isNotEmpty) ...[
-            pw.SizedBox(height: 18),
-            pw.Text(
-              'Bank details',
-              style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-            ),
-            pw.Text(
-              'Bank: ${profile['bankName'] ?? '-'}\nBranch: ${profile['bankBranch'] ?? '-'}\nA/c No.: ${profile['bankAccount'] ?? '-'}\nIFSC: ${profile['ifsc'] ?? '-'}\nUPI ID: ${profile['upiId'] ?? '-'}',
-            ),
-          ],
-          if (widget.terms.isNotEmpty) ...[
-            pw.SizedBox(height: 18),
-            pw.Text(
-              'Terms and conditions',
-              style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-            ),
-            pw.Text(widget.terms),
-          ],
-          pw.SizedBox(height: 26),
-          pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: pw.CrossAxisAlignment.end,
-            children: [qr ?? pw.SizedBox(), pdfSignatureBlock(signature)],
-          ),
-        ],
-        footer: (_) => pw.Align(
-          alignment: pw.Alignment.center,
-          child: pw.Text(
-            'This is a computer-generated invoice.',
-            style: const pw.TextStyle(fontSize: 8),
-          ),
-        ),
+  Future<Uint8List> build(PdfPageFormat format) {
+    final items = [for (final item in widget.items) item.toPdf()];
+    final exact = items.fold<double>(0, (sum, item) => sum + item.amount);
+    final total = widget.total ?? roundToRupee(exact);
+    final paid = widget.paid ?? (total - widget.balanceDue).clamp(0, total);
+    final gst =
+        widget.gstDocument ??
+        (BusinessSettings.isGstRegistered.value ||
+            items.any((item) => item.tax > 0));
+    return buildDocumentPdf(
+      PdfDocumentData(
+        kind: PdfDocumentKind.invoice,
+        number: widget.invoiceNumber,
+        date: widget.invoiceDate,
+        secondDate: widget.dueDate,
+        placeOfSupply: widget.placeOfSupply,
+        customerName: widget.customerName,
+        customerAddress: widget.customerAddress,
+        customerGstin: gst ? widget.customerGstin : '',
+        customerPhone: widget.customerPhone,
+        items: items,
+        total: total,
+        paid: paid.toDouble(),
+        terms: widget.terms,
+        gstDocument: gst,
+        sample: widget.previewProfile != null,
       ),
+      _profile,
+      format: format,
     );
-    return pdf.save();
   }
-
-  pw.Widget _pdfTotal(String label, double value, {bool bold = false}) =>
-      pw.Padding(
-        padding: const pw.EdgeInsets.symmetric(vertical: 3),
-        child: pw.Row(
-          children: [
-            pw.Expanded(
-              child: pw.Text(
-                label,
-                style: pw.TextStyle(
-                  fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
-                ),
-              ),
-            ),
-            pw.Text(
-              'Rs. ${value.toStringAsFixed(2)}',
-              style: pw.TextStyle(
-                fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
-              ),
-            ),
-          ],
-        ),
-      );
 }
 
 class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
@@ -9894,7 +9890,7 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
   String get _message =>
       'Hello ${widget.customerName}, here is the invoice ($_invoiceNumber) from '
       '${BusinessSettings.profile.value['name'] ?? ''}. Please make the payment of '
-      'rupees ${widget.balanceDue.toStringAsFixed(2)} to the payment details as mentioned '
+      'rupees ${indianNumber(widget.balanceDue)} to the payment details as mentioned '
       'in the invoice. If you need any further assistance, please contact us '
       '${BusinessSettings.profile.value['phone'] ?? ''} or '
       '${BusinessSettings.profile.value['email'] ?? ''}. Thank you';
@@ -10049,42 +10045,204 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
     await _sendAttachment('email', widget.customerEmail.trim());
   }
 
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: Text(
-        widget.previewProfile != null
-            ? 'Sample invoice format'
-            : 'Invoice Preview',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: Text(widget.previewProfile != null ? 'Close' : 'Save & Close'),
+  Future<void> _print() async {
+    try {
+      await Printing.layoutPdf(onLayout: _generatePdf);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Unable to print: $error')));
+      }
+    }
+  }
+
+  Future<void> _download() async {
+    try {
+      await Printing.sharePdf(
+        bytes: await _generatePdf(PdfPageFormat.a4),
+        filename: documentPdfFilename('invoice', _invoiceNumber),
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Unable to download: $error')));
+      }
+    }
+  }
+
+  Widget _summary(InvoiceViewActions view) {
+    final theme = Theme.of(context);
+    Widget figure(String label, String value, {bool strong = false}) => Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: theme.textTheme.bodySmall),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: strong
+              ? theme.textTheme.titleMedium?.copyWith(
+                  color: theme.colorScheme.primary,
+                )
+              : theme.textTheme.titleMedium,
         ),
       ],
-    ),
-    body: widget.previewProfile != null
-        ? PdfPreview(
-            build: _generatePdf,
-            canChangePageFormat: false,
-            canChangeOrientation: false,
-            allowPrinting: false,
-            allowSharing: false,
-          )
-        : _SavedDocumentPreview(
-            buildPdf: _generatePdf,
-            addNewLabel: 'Save & Add New Invoice',
-            onAddNew: () => Navigator.of(context).pop(true),
+    );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Wrap(
+            spacing: 24,
+            runSpacing: 10,
+            children: [
+              figure('Total', rupees(view.total)),
+              figure('Paid', rupees(view.paid)),
+              figure('Balance due', rupees(view.balance), strong: true),
+              figure('Due date', displayDate(view.dueDate)),
+            ],
           ),
-    bottomNavigationBar: widget.previewProfile != null
-        ? null
-        : DocumentShareBar(
-            onWhatsApp: _sharing ? null : _openWhatsApp,
-            onEmail: _sharing ? null : _openEmail,
-            onShare: _sharing ? null : _sharePdf,
-          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _viewBody(InvoiceViewActions view) => Column(
+    children: [
+      _summary(view),
+      Expanded(
+        child: PdfPreview(
+          build: _generatePdf,
+          useActions: false,
+          canDebug: false,
+          canChangePageFormat: false,
+          canChangeOrientation: false,
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+        child: Wrap(
+          alignment: WrapAlignment.center,
+          spacing: 8,
+          children: [
+            TextButton.icon(
+              onPressed: _print,
+              icon: const Icon(Icons.print_outlined),
+              label: const Text('Print'),
+            ),
+            if (kIsWeb)
+              TextButton.icon(
+                onPressed: _download,
+                icon: const Icon(Icons.download_outlined),
+                label: const Text('Download'),
+              ),
+          ],
+        ),
+      ),
+    ],
   );
+
+  @override
+  Widget build(BuildContext context) {
+    final view = widget.view;
+    if (view != null) {
+      return Scaffold(
+        appBar: AppBar(
+          title: Row(
+            children: [
+              Flexible(
+                child: Text(_invoiceNumber, overflow: TextOverflow.ellipsis),
+              ),
+              const SizedBox(width: 10),
+              InvoiceStatusBadge(view.status),
+            ],
+          ),
+          actions: [
+            if (view.onEdit != null ||
+                view.onDuplicate != null ||
+                view.onRecordPayment != null)
+              PopupMenuButton<String>(
+                tooltip: 'More actions',
+                onSelected: (value) async {
+                  final action = switch (value) {
+                    'edit' => view.onEdit,
+                    'duplicate' => view.onDuplicate,
+                    _ => view.onRecordPayment,
+                  };
+                  await action?.call();
+                },
+                itemBuilder: (_) => [
+                  if (view.onEdit != null)
+                    const PopupMenuItem(
+                      value: 'edit',
+                      child: Text('Edit invoice'),
+                    ),
+                  if (view.onDuplicate != null)
+                    const PopupMenuItem(
+                      value: 'duplicate',
+                      child: Text('Duplicate invoice'),
+                    ),
+                  if (view.onRecordPayment != null)
+                    const PopupMenuItem(
+                      value: 'payment',
+                      child: Text('Record payment'),
+                    ),
+                ],
+              ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+        body: _viewBody(view),
+        bottomNavigationBar: DocumentShareBar(
+          onWhatsApp: _sharing ? null : _openWhatsApp,
+          onEmail: _sharing ? null : _openEmail,
+          onShare: _sharing ? null : _sharePdf,
+        ),
+      );
+    }
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          widget.previewProfile != null
+              ? 'Sample invoice format'
+              : 'Invoice Preview',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(
+              widget.previewProfile != null ? 'Close' : 'Save & Close',
+            ),
+          ),
+        ],
+      ),
+      body: widget.previewProfile != null
+          ? PdfPreview(
+              build: _generatePdf,
+              canChangePageFormat: false,
+              canChangeOrientation: false,
+              allowPrinting: false,
+              allowSharing: false,
+            )
+          : _SavedDocumentPreview(
+              buildPdf: _generatePdf,
+              addNewLabel: 'Save & Add New Invoice',
+              onAddNew: () => Navigator.of(context).pop(true),
+            ),
+      bottomNavigationBar: widget.previewProfile != null
+          ? null
+          : DocumentShareBar(
+              onWhatsApp: _sharing ? null : _openWhatsApp,
+              onEmail: _sharing ? null : _openEmail,
+              onShare: _sharing ? null : _sharePdf,
+            ),
+    );
+  }
 }
 
 class ProductsPage extends StatefulWidget {

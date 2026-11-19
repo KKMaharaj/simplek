@@ -372,6 +372,7 @@ class ModernOverview extends StatelessWidget {
     required this.onProduct,
     required this.onInvoices,
     required this.onRefresh,
+    this.onOpenInvoice,
   });
   final String sales, outstanding, invoiceCount, customerCount, businessName;
   final String? productCount;
@@ -387,6 +388,9 @@ class ModernOverview extends StatelessWidget {
       onProduct,
       onInvoices;
   final Future<void> Function() onRefresh;
+
+  /// Opens one recent invoice by id. Falls back to the list when null.
+  final void Function(String id)? onOpenInvoice;
 
   static String _greeting() {
     final hour = DateTime.now().hour;
@@ -569,7 +573,13 @@ class ModernOverview extends StatelessWidget {
                 children: [
                   for (final (index, row) in recent.indexed) ...[
                     if (index > 0) const Divider(indent: 72),
-                    _RecentInvoiceRow(row: row, onTap: onInvoices),
+                    _RecentInvoiceRow(
+                      row: row,
+                      onTap:
+                          onOpenInvoice != null && (row['id'] ?? '').isNotEmpty
+                          ? () => onOpenInvoice!(row['id']!)
+                          : onInvoices,
+                    ),
                   ],
                 ],
               ),

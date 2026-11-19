@@ -1,6 +1,6 @@
 # Simplek — complete project summary
 
-Last updated: 17 November 2026 (commit `69a8fe1` on `master`).
+Last updated: 19 November 2026 (version 1.2.0, build 20261120).
 
 Paste or attach this file at the start of a new Claude chat to give it the full
 picture. It covers what Simplek is, what is built and live, how it is put
@@ -75,16 +75,18 @@ Ekathva Innovations (invoice prefix `EINV`) and two Malnad Kitchen accounts
 | `lib/app_lock.dart` | Fingerprint / face unlock |
 | `lib/business_access.dart` | Accountant (view-only) access |
 | `lib/live_sync.dart` | Realtime refresh across devices |
+| `lib/document_pdf.dart`, `lib/money.dart` | Invoice and quotation PDF layout; rupee formatting and round off |
+| `lib/image_editor.dart` | Crop and clean-background editor for signature, logo and QR |
 | `lib/offline_queue.dart` | Uploads items older app versions left on the device |
 | `lib/signature_pad.dart`, `lib/signature_image.dart` | Signing pad and signature sizing on PDFs |
 | `lib/platform/local_files*.dart` | File access that works on phone and web |
 | `lib/payment_pdf.dart`, `invoice_palette.dart`, `document_*.dart` | UPI QR, invoice colours, defaults, sharing, amount in words |
 | `supabase/migrations/` | 25 database migrations, unique 14-digit versions |
-| `supabase/tests/` | 3 rollback-only SQL regression scripts |
+| `supabase/tests/` | 4 rollback-only SQL regression scripts |
 | `supabase/functions/gstin-lookup/` | GSTIN lookup proxy |
 | `website/` | Public website |
 | `tool/build_site.sh`, `tool/zip_site.dart`, `tool/serve.dart` | Build, zip and locally preview the site |
-| `test/` | 8 Flutter test files (39 tests) |
+| `test/` | 10 Flutter test files (55 tests) |
 | `PROJECT_TRACKER.md` | Running change log with dates |
 | `docs/AI-Handoff-Billing-Website.md` | Older brief for a separate billing website |
 
@@ -127,6 +129,10 @@ Ekathva Innovations (invoice prefix `EINV`) and two Malnad Kitchen accounts
 | 16 Nov | Website rewritten around "sales invoices only" with pricing. |
 | 16 Nov | Android release build fixed (version raised to 1.1.0 build 20261116; internet permission added) and installed on the owner's phone. |
 | 16 Nov | Website and web app **published** at simplek.pages.dev; Supabase redirect added for web sign-up. |
+| 19 Nov | **New invoice and quotation PDF** after the Eesha Herbals reference (page frame, bordered boxes, HSN/SAC, tax lines per rate, ₹ with Indian commas); **round off** to the rupee; **TAX INVOICE** only for GST-registered businesses, **INVOICE** with no GST otherwise. |
+| 19 Nov | **Invoice view** screen (tap any invoice in the list or on Home): PDF, share, print, edit, duplicate, record payment. Tidier invoice and quotation lists. |
+| 19 Nov | **Signature, logo and QR editor:** free crop, zoom, rotate, clean background, preview in the invoice box; edit, redraw or remove later. |
+| 19 Nov | Removed "Default place of supply" and "Financial year"; theme and fingerprint unlock moved to Settings → App preferences; prefix-length warning; 2-digit document numbers confirmed with a new regression test. Version 1.2.0 (build 20261120). |
 
 ---
 
@@ -159,9 +165,9 @@ Ekathva Innovations (invoice prefix `EINV`) and two Malnad Kitchen accounts
 
 Run these from `D:\projects\simple_billing`.
 
-- **Check the code:** `flutter analyze` and `flutter test` (39 tests pass).
-- **Android app:** raise `version:` in `pubspec.yaml` (the phone has build
-  20261116, so the next must be higher), then `flutter build apk --release`.
+- **Check the code:** `flutter analyze` and `flutter test` (55 tests pass).
+- **Android app:** raise `version:` in `pubspec.yaml` (the newest build is
+  1.2.0+20261120, so the next must be higher), then `flutter build apk --release`.
   The APK is in `build/app/outputs/flutter-apk/app-release.apk` (about 64 MB).
   Install over the old app without uninstalling. If the phone refuses, connect
   it with USB debugging and install with `adb`.
@@ -200,13 +206,20 @@ Run these from `D:\projects\simple_billing`.
 - Payments can't be viewed, edited or reversed, and reference/notes aren't
   captured.
 - Invoice prefixes allow 20 characters; GST rules may cap invoice numbers at
-  16 (to be confirmed with a tax adviser).
+  16 (to be confirmed with a tax adviser). Settings now warns when a prefix
+  would exceed 16, but doesn't block it.
+- Round off applies to documents saved from 19 Nov 2026; older invoices keep
+  their exact totals.
 
 **App**
 - `lib/main.dart` is one 11,000-line file; most screens keep their old layout
   inside the new theme, and some unused "Classic" design branches remain.
-- PDFs use the built-in Helvetica font: amounts print as `Rs.` not `₹`, and
-  non-Latin names (Hindi, Kannada, Malayalam) probably won't print.
+- PDFs now embed Noto Sans, so `₹` prints, but Indian-script names (Hindi,
+  Kannada, Malayalam) won't print correctly: the `pdf` package doesn't shape
+  those scripts. Not tested.
+- HSN/SAC on PDFs comes from the product record at print time; invoices don't
+  store their own copy, so changing a product's HSN changes old PDFs too.
+- The place-of-supply prefill on new invoices has no automated test.
 - Saved business details (bank, UPI, PAN) stay on the device after logout and
   aren't tied to a user.
 - GSTIN verification shows "active" when the provider returns no status; the
@@ -251,7 +264,8 @@ Run these from `D:\projects\simple_billing`.
    invoices; money in paise; carry GSTIN into converted quotations.
 6. **Redesign the remaining screens** (invoice and quotation builders, lists,
    reports, settings) in the new style, and split `main.dart` into files.
-7. **PDF fonts:** embed a Unicode font for `₹` and Indian scripts.
+7. **Indian-script names on PDFs:** needs a PDF engine that shapes Kannada
+   and Hindi (the `₹` part is done).
 8. **Payments:** history, edit and reverse, reference and notes.
 9. **Operations:** automatic website deploys, regular database backups (or a
    paid Supabase plan), and complete migrations that can rebuild the database.
