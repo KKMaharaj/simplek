@@ -171,10 +171,14 @@ Run these from `D:\projects\simple_billing`.
   The APK is in `build/app/outputs/flutter-apk/app-release.apk` (about 64 MB).
   Install over the old app without uninstalling. If the phone refuses, connect
   it with USB debugging and install with `adb`.
-- **Website and web app:** `bash tool/build_site.sh` builds both and creates
-  `build/simplek-site.zip`. Upload it as a new deployment of the Cloudflare
-  Pages project `simplek` (dashboard → Workers & Pages → simplek → Create
-  deployment). Preview locally with `dart run tool/serve.dart` at
+- **Website and web app:** `.github/workflows/deploy-site.yml` builds both
+  and deploys them to the Cloudflare Pages project `simplek` on every push to
+  `master`, after `flutter analyze` and `flutter test` pass (if either fails,
+  nothing is deployed). **Pushing to master deploys the web app to real
+  users. Push only finished, tested work. Use a separate branch for anything
+  in progress.** A manual run on another branch checks and builds but never
+  deploys. Locally, `bash tool/build_site.sh` builds both and creates
+  `build/simplek-site.zip`; preview with `dart run tool/serve.dart` at
   http://localhost:8080.
 - **Database changes:** add a new file in `supabase/migrations/` with a unique
   14-digit version, test it, then `supabase db push --remote --dry-run` and

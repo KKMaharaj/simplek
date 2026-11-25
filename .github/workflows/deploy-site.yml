@@ -2,7 +2,8 @@
 # them to Cloudflare Pages, project "simplek" (https://simplek.pages.dev).
 #
 # Runs on every push to master that touches the site or the app, and can be
-# started by hand from the Actions tab ("Run workflow").
+# started by hand from the Actions tab ("Run workflow"). It analyses and tests
+# the app first; if either fails, nothing is deployed.
 #
 # Needs two repository secrets (Settings > Secrets and variables > Actions):
 #   CLOUDFLARE_API_TOKEN   a token with "Account > Cloudflare Pages > Edit"
@@ -44,10 +45,21 @@ jobs:
       - name: Get packages
         run: flutter pub get
 
+      # Nothing is deployed unless the code analyses cleanly and every test
+      # passes. Tests that need a device or the network skip themselves.
+      - name: Analyse
+        run: flutter analyze --no-fatal-infos
+
+      - name: Test
+        run: flutter test
+
       - name: Build website and web app
         run: bash tool/build_site.sh
 
+      # Only master is ever published. A manual run on another branch still
+      # analyses, tests and builds, but stops before anything is deployed.
       - name: Find the production branch
+        if: github.ref == 'refs/heads/master'
         id: branch
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -61,6 +73,7 @@ jobs:
           echo "name=$branch" >> "$GITHUB_OUTPUT"
 
       - name: Deploy to Cloudflare Pages
+        if: github.ref == 'refs/heads/master'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
