@@ -14,6 +14,7 @@ import 'business_access.dart';
 import 'platform/local_files.dart';
 import 'signature_pad.dart';
 import 'image_editor.dart';
+import 'app_version.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -2222,6 +2223,8 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
                   ),
+                  const SizedBox(height: 16),
+                  const VersionLine(),
                 ],
               ),
             ),
@@ -5702,6 +5705,8 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
                 const SizedBox(height: 12),
                 const AppLockSetting(),
                 const SizedBox(height: 24),
+                const VersionLine(),
+                const SizedBox(height: 16),
               ],
             ),
           );
