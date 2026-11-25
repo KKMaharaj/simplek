@@ -321,3 +321,14 @@ Not done in this round: forgot password and sign-up OTP (owner decision).
 Not tried by hand on the phone or in the logged-in web app; the place-of-
 supply prefill has no automated test (the builder needs a live Supabase
 session in tests).
+
+## November 25 website redesign live (website change request of 19 Nov, part 1)
+
+- Deployed to Cloudflare Pages (`simplek`) by direct upload of
+  `build/simplek-site.zip`. This upload also put the 19 Nov app changes on the
+  web app (https://simplek.pages.dev/app/) for the first time.
+- New copy (no "sales invoices only"), "Why pay for a full accounting suite"
+  and "Simple + Lekka" sections, FAQ, navy/orange/sky palette, self-hosted
+  Fraunces/Inter/Noto Sans Kannada in `website/fonts/`, hero with the app and a
+  sample invoice from made-up data (`test/website_sample_test.dart`).
+- Kannada checked on Windows Chrome; not yet checked on Android Chrome.
