@@ -1,0 +1,75 @@
+# Builds the website and the Flutter web app (tool/build_site.sh) and deploys
+# them to Cloudflare Pages, project "simplek" (https://simplek.pages.dev).
+#
+# Runs on every push to master that touches the site or the app, and can be
+# started by hand from the Actions tab ("Run workflow").
+#
+# Needs two repository secrets (Settings > Secrets and variables > Actions):
+#   CLOUDFLARE_API_TOKEN   a token with "Account > Cloudflare Pages > Edit"
+#   CLOUDFLARE_ACCOUNT_ID  the Cloudflare account ID
+name: Deploy site
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "website/**"
+      - "lib/**"
+      - "web/**"
+      - "assets/**"
+      - "pubspec.yaml"
+      - "pubspec.lock"
+      - "tool/build_site.sh"
+      - "tool/zip_site.dart"
+      - ".github/workflows/deploy-site.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-site
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.0
+          channel: stable
+          cache: true
+
+      - name: Get packages
+        run: flutter pub get
+
+      - name: Build website and web app
+        run: bash tool/build_site.sh
+
+      - name: Find the production branch
+        id: branch
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          branch=$(curl -fsS \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/simplek" \
+            | jq -r '.result.production_branch')
+          echo "Production branch: $branch"
+          echo "name=$branch" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BRANCH: ${{ steps.branch.outputs.name }}
+          COMMIT_MSG: ${{ github.event.head_commit.message || 'Manual deploy' }}
+        run: |
+          npx --yes wrangler@4 pages deploy build/site \
+            --project-name=simplek \
+            --branch="$BRANCH" \
+            --commit-hash="$GITHUB_SHA" \
+            --commit-message="$(printf '%s' "$COMMIT_MSG" | head -n 1)" \
+            --commit-dirty=true
