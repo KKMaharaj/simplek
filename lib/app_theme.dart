@@ -10,6 +10,23 @@ abstract final class SimplekColors {
   static const warning = Color(0xFFE38A0B);
   static const danger = Color(0xFFE5484D);
 
+  // 25 Nov 2026 palette, shared with the website (UI_REDESIGN_2026-11-25.md).
+  static const navy = Color(0xFF0B1A33);
+  static const navy2 = Color(0xFF12306B);
+  static const navyDeep = Color(0xFF050C1A);
+  static const orange = Color(0xFFF26B1D);
+  static const orangeText = Color(0xFFC2410C);
+  static const orangeTint = Color(0xFFFFF1E8);
+  static const sky = Color(0xFF7CCBFF);
+  static const skyTint = Color(0xFFE8F5FF);
+  static const skyLine = Color(0xFFBFE6FF);
+  static const skyText = Color(0xFF1D6FA3);
+  static const navyTint = Color(0xFFE7ECF5);
+  static const page = Color(0xFFF7F9FC);
+  static const line = Color(0xFFE2E8F0);
+  static const slate = Color(0xFF475569);
+  static const grey = Color(0xFFF1F5F9);
+
   static const heroGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,

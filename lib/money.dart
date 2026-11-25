@@ -1,6 +1,9 @@
 /// Money formatting and rounding shared by the app screens and the PDFs.
 library;
 
+export 'india_states.dart'
+    show gstStateCode, stateWithCode, sameGstState, composeBusinessAddress;
+
 /// Amount in whole paise, avoiding floating-point noise such as 2799.9899.
 int toPaise(num amount) => (amount * 100).round();
 
@@ -66,60 +69,3 @@ String displayDate(DateTime? date) => date == null
 /// Parses a stored date such as "2026-11-19" or "2026-11-19T00:00:00".
 DateTime? parseStoredDate(Object? value) =>
     value == null ? null : DateTime.tryParse(value.toString());
-
-/// The GST state code for a state or union territory name, e.g. "29" for
-/// Karnataka. Returns null when the name is not recognised.
-String? gstStateCode(String state) {
-  final name = state.trim().toLowerCase();
-  for (final entry in _gstStateCodes.entries) {
-    if (entry.value.toLowerCase() == name) return entry.key;
-  }
-  return null;
-}
-
-/// "Karnataka (29)", or the name alone if its code is not known.
-String stateWithCode(String state) {
-  final code = gstStateCode(state);
-  return code == null || state.trim().isEmpty
-      ? state.trim()
-      : '${state.trim()} ($code)';
-}
-
-const _gstStateCodes = <String, String>{
-  '01': 'Jammu and Kashmir',
-  '02': 'Himachal Pradesh',
-  '03': 'Punjab',
-  '04': 'Chandigarh',
-  '05': 'Uttarakhand',
-  '06': 'Haryana',
-  '07': 'Delhi',
-  '08': 'Rajasthan',
-  '09': 'Uttar Pradesh',
-  '10': 'Bihar',
-  '11': 'Sikkim',
-  '12': 'Arunachal Pradesh',
-  '13': 'Nagaland',
-  '14': 'Manipur',
-  '15': 'Mizoram',
-  '16': 'Tripura',
-  '17': 'Meghalaya',
-  '18': 'Assam',
-  '19': 'West Bengal',
-  '20': 'Jharkhand',
-  '21': 'Odisha',
-  '22': 'Chhattisgarh',
-  '23': 'Madhya Pradesh',
-  '24': 'Gujarat',
-  '26': 'Dadra and Nagar Haveli and Daman and Diu',
-  '27': 'Maharashtra',
-  '29': 'Karnataka',
-  '30': 'Goa',
-  '31': 'Lakshadweep',
-  '32': 'Kerala',
-  '33': 'Tamil Nadu',
-  '34': 'Puducherry',
-  '35': 'Andaman and Nicobar Islands',
-  '36': 'Telangana',
-  '37': 'Andhra Pradesh',
-  '38': 'Ladakh',
-};

@@ -224,15 +224,7 @@ void main() {
         theme: simplekTheme(Brightness.light),
         home: Scaffold(
           body: SearchableStateField(
-            items: const [
-              DropdownMenuItem(value: 'Telangana', child: Text('Telangana')),
-              DropdownMenuItem(
-                value: 'Dadra and Nagar Haveli and Daman and Diu',
-                child: Text('Dadra and Nagar Haveli and Daman and Diu'),
-              ),
-            ],
             onChanged: (value) => selected = value,
-            decoration: const InputDecoration(labelText: 'State'),
           ),
         ),
       ),

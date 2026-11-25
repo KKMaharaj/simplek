@@ -8,7 +8,7 @@ import 'platform/local_files.dart';
 
 /// Size of the signature on invoices and quotations, in PDF points.
 const signaturePdfWidth = 200.0;
-const signaturePdfHeight = 84.0;
+const signaturePdfHeight = 56.0;
 
 /// Crops empty paper around a signature so the ink fills its box on the
 /// document. Photos and old drawn signatures have large blank margins, which

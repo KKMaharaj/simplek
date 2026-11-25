@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 
 import 'app_theme.dart';
+import 'form_fields.dart';
+import 'india_states.dart';
 
 export 'app_theme.dart';
+export 'form_fields.dart';
+export 'india_states.dart';
 
 /// Which section of the app shell is showing.
 class DesignSettings {
@@ -219,137 +223,205 @@ class InvoiceStatusBadge extends StatelessWidget {
   }
 }
 
+/// A field that opens a searchable list (states, districts). The label sits
+/// above the box; when nothing is chosen the box shows only a grey hint, so
+/// the two can never overlap (CR-25 change 3).
+class SearchablePickerField extends StatelessWidget {
+  const SearchablePickerField({
+    super.key,
+    required this.label,
+    required this.options,
+    this.value,
+    this.onChanged,
+    this.validator,
+    this.required = false,
+    this.hint = 'Select',
+    this.helperText,
+    this.sheetTitle,
+    this.searchHint = 'Search',
+    this.emptyText = 'Nothing matches',
+    this.readOnly = false,
+  });
+
+  final String label;
+  final List<String> options;
+  final String? value;
+  final ValueChanged<String?>? onChanged;
+  final FormFieldValidator<String>? validator;
+  final bool required;
+  final String hint;
+  final String? helperText;
+  final String? sheetTitle;
+  final String searchHint;
+  final String emptyText;
+
+  /// Shows the value but can't be changed (e.g. the state from a GSTIN).
+  final bool readOnly;
+
+  Future<void> _open(BuildContext context, FormFieldState<String> field) async {
+    var query = '';
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, update) {
+          final visible = options
+              .where((option) => option.toLowerCase().contains(query))
+              .toList();
+          return Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.viewInsetsOf(context).bottom,
+            ),
+            child: SizedBox(
+              height: MediaQuery.sizeOf(context).height * 0.7,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    child: Text(
+                      sheetTitle ?? 'Select ${label.toLowerCase()}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: TextField(
+                      autofocus: options.length > 12,
+                      decoration: InputDecoration(
+                        hintText: searchHint,
+                        prefixIcon: const Icon(Icons.search),
+                      ),
+                      onChanged: (text) =>
+                          update(() => query = text.trim().toLowerCase()),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: visible.isEmpty
+                        ? Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Text(emptyText, textAlign: TextAlign.center),
+                          )
+                        : ListView.builder(
+                            itemCount: visible.length,
+                            itemBuilder: (_, index) {
+                              final option = visible[index];
+                              final selected = option == field.value;
+                              return ListTile(
+                                title: Text(option),
+                                selected: selected,
+                                trailing: selected
+                                    ? const Icon(Icons.check)
+                                    : null,
+                                onTap: () =>
+                                    Navigator.of(sheetContext).pop(option),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+    if (context.mounted && result != null) {
+      field.didChange(result);
+      onChanged?.call(result);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final disabled = onChanged == null && !readOnly;
+    return FormField<String>(
+      key: ValueKey('$label:$value:$readOnly'),
+      initialValue: value,
+      validator: validator,
+      builder: (field) {
+        final shown = field.value;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            FieldLabel(label, required: required),
+            Opacity(
+              opacity: disabled ? 0.5 : 1,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: readOnly || disabled
+                    ? null
+                    : () => _open(context, field),
+                child: InputDecorator(
+                  isEmpty: false,
+                  decoration: InputDecoration(
+                    errorText: field.errorText,
+                    helperText: helperText,
+                    filled: true,
+                    fillColor: readOnly ? SimplekColors.navyTint : null,
+                    suffixIcon: Icon(
+                      readOnly ? Icons.lock_outline : Icons.expand_more,
+                    ),
+                  ),
+                  child: Text(
+                    shown ?? hint,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: shown == null
+                        ? TextStyle(color: theme.colorScheme.onSurfaceVariant)
+                        : const TextStyle(fontSize: 16),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// The state / union territory picker used everywhere.
 class SearchableStateField extends StatelessWidget {
   const SearchableStateField({
     super.key,
-    this.initialValue,
-    this.isExpanded = true,
-    required this.items,
-    required this.onChanged,
-    required this.decoration,
+    this.label = 'State',
+    this.value,
+    this.onChanged,
     this.validator,
+    this.required = false,
+    this.helperText,
+    this.readOnly = false,
   });
-  final String? initialValue;
-  final bool isExpanded;
-  final List<DropdownMenuItem<String>> items;
+
+  final String label;
+  final String? value;
   final ValueChanged<String?>? onChanged;
-  final InputDecoration decoration;
   final FormFieldValidator<String>? validator;
+  final bool required;
+  final String? helperText;
+  final bool readOnly;
+
   @override
-  Widget build(BuildContext context) {
-    if (!DesignSettings.modern.value) {
-      return DropdownButtonFormField<String>(
-        initialValue: initialValue,
-        isExpanded: isExpanded,
-        items: items,
-        onChanged: onChanged,
-        decoration: decoration,
-        validator: validator,
-      );
-    }
-    return FormField<String>(
-      key: ValueKey(initialValue),
-      initialValue: initialValue,
-      validator: validator,
-      builder: (field) => InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onChanged == null
-            ? null
-            : () async {
-                var query = '';
-                final result = await showModalBottomSheet<String>(
-                  context: context,
-                  isScrollControlled: true,
-                  useSafeArea: true,
-                  builder: (sheetContext) => StatefulBuilder(
-                    builder: (context, update) => Padding(
-                      padding: EdgeInsets.only(
-                        bottom: MediaQuery.viewInsetsOf(context).bottom,
-                      ),
-                      child: SizedBox(
-                        height: MediaQuery.sizeOf(context).height * 0.65,
-                        child: Column(
-                          children: [
-                            const Padding(
-                              padding: EdgeInsets.all(16),
-                              child: Text(
-                                'Select State / Union Territory',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                              ),
-                              child: TextField(
-                                decoration: const InputDecoration(
-                                  hintText: 'Search states and UTs',
-                                  prefixIcon: Icon(Icons.search),
-                                ),
-                                onChanged: (value) => update(
-                                  () => query = value.trim().toLowerCase(),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Expanded(
-                              child: ListView(
-                                children: [
-                                  for (final item in items.where(
-                                    (item) => (item.value ?? '')
-                                        .toLowerCase()
-                                        .contains(query),
-                                  ))
-                                    ListTile(
-                                      title: Text(item.value ?? ''),
-                                      selected: item.value == field.value,
-                                      trailing: item.value == field.value
-                                          ? const Icon(Icons.check)
-                                          : null,
-                                      onTap: () => Navigator.of(
-                                        sheetContext,
-                                      ).pop(item.value),
-                                    ),
-                                  if (!items.any(
-                                    (item) => (item.value ?? '')
-                                        .toLowerCase()
-                                        .contains(query),
-                                  ))
-                                    const ListTile(
-                                      title: Text(
-                                        'No matching states or Union Territories',
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-                if (context.mounted && result != null) {
-                  field.didChange(result);
-                  onChanged!(result);
-                }
-              },
-        child: InputDecorator(
-          decoration: decoration.copyWith(errorText: field.errorText),
-          isEmpty: field.value == null,
-          child: Row(
-            children: [
-              Expanded(child: Text(field.value ?? 'Select state')),
-              const Icon(Icons.expand_more),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => SearchablePickerField(
+    label: label,
+    options: indiaStateNames,
+    value: stateNamed(value ?? '')?.name,
+    onChanged: onChanged,
+    validator: validator,
+    required: required,
+    helperText: helperText,
+    readOnly: readOnly,
+    hint: 'Select state',
+    sheetTitle: 'Select State / Union Territory',
+    searchHint: 'Search states and UTs',
+    emptyText: 'No matching states or Union Territories',
+  );
 }
 
 /// The home screen: money owed up front, then shortcuts and recent invoices.

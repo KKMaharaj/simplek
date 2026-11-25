@@ -29,13 +29,10 @@ class PdfLineItem {
     this.gstRate = 0,
     this.unit = '',
     this.hsn = '',
-    this.note = '',
   });
 
   final String description;
 
-  /// Small grey second line under the description, e.g. the SKU.
-  final String note;
   final String hsn;
   final double quantity;
   final String unit;
@@ -64,6 +61,7 @@ class PdfDocumentData {
     this.customerPhone = '',
     this.paid = 0,
     this.terms = '',
+    this.description = '',
     this.sample = false,
   });
 
@@ -85,6 +83,9 @@ class PdfDocumentData {
   final double total;
   final double paid;
   final String terms;
+
+  /// Optional short description, up to 300 characters (CR-25 change 9).
+  final String description;
 
   /// True for a GST document: the business is registered, or the document
   /// was saved with tax. Decides the title, GST columns and tax lines.
@@ -111,9 +112,7 @@ Future<_Fonts> _loadFonts() async => _fonts ??= _Fonts(
   pw.Font.ttf(await rootBundle.load('assets/fonts/NotoSans-Bold.ttf')),
 );
 
-bool _sameState(String a, String b) =>
-    a.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ') ==
-    b.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+bool _sameState(String a, String b) => sameGstState(a, b);
 
 /// Builds the PDF for [data] using the business [profile].
 Future<Uint8List> buildDocumentPdf(
@@ -175,11 +174,11 @@ Future<Uint8List> buildDocumentPdf(
       footer: layout.footer,
       build: (context) => [
         layout.header(),
-        pw.SizedBox(height: 12),
+        pw.SizedBox(height: _Layout.gap),
         layout.partyBox(),
-        pw.SizedBox(height: 12),
+        pw.SizedBox(height: _Layout.gap),
         layout.itemsTable(),
-        pw.SizedBox(height: 12),
+        pw.SizedBox(height: _Layout.gap),
         // Boxes 5-7 move to the next page together rather than split.
         pw.Container(
           child: pw.Column(
@@ -187,10 +186,14 @@ Future<Uint8List> buildDocumentPdf(
             children: [
               layout.wordsAndTotals(),
               if (layout.paymentBox() case final payment?) ...[
-                pw.SizedBox(height: 12),
+                pw.SizedBox(height: _Layout.gap),
                 payment,
               ],
-              pw.SizedBox(height: 12),
+              if (layout.descriptionBox() case final description?) ...[
+                pw.SizedBox(height: _Layout.gap),
+                description,
+              ],
+              pw.SizedBox(height: _Layout.gap),
               layout.termsAndSignature(),
             ],
           ),
@@ -223,6 +226,10 @@ class _Layout {
   static const text = PdfColor.fromInt(0xFF1F2430);
   static const muted = PdfColor.fromInt(0xFF5B6170);
 
+  /// Space between boxes, and the padding inside them (CR-25 change 10).
+  static const gap = 8.0;
+  static const boxPadding = pw.EdgeInsets.fromLTRB(12, 7, 12, 8);
+
   PdfColor get ink => palette.pdfInk;
   PdfColor get tint => PdfColor(
     ink.red * 0.1 + 0.9,
@@ -250,35 +257,58 @@ class _Layout {
       pw.TextStyle(fontWeight: pw.FontWeight.bold, color: ink);
 
   pw.Widget _box(pw.Widget child, {pw.EdgeInsets? padding}) => pw.Container(
-    padding: padding ?? const pw.EdgeInsets.fromLTRB(12, 9, 12, 10),
+    padding: padding ?? boxPadding,
     decoration: pw.BoxDecoration(border: pw.Border.fromBorderSide(line)),
     child: child,
   );
 
   /// Two halves inside one bordered box, with a divider between them. A
   /// table sizes the row to the taller half and draws the divider itself.
-  pw.Widget _split(pw.Widget left, pw.Widget right, {int leftFlex = 1}) =>
-      pw.Table(
-        border: pw.TableBorder.all(color: ink, width: 0.8),
-        columnWidths: {
-          0: pw.FlexColumnWidth(leftFlex.toDouble()),
-          1: const pw.FlexColumnWidth(1),
-        },
+  /// [middle] centres both halves vertically (the payment box).
+  pw.Widget _split(
+    pw.Widget left,
+    pw.Widget right, {
+    int leftFlex = 1,
+    bool middle = false,
+  }) => pw.Table(
+    border: pw.TableBorder.all(color: ink, width: 0.8),
+    columnWidths: {
+      0: pw.FlexColumnWidth(leftFlex.toDouble()),
+      1: const pw.FlexColumnWidth(1),
+    },
+    children: [
+      pw.TableRow(
+        verticalAlignment: middle
+            ? pw.TableCellVerticalAlignment.middle
+            : pw.TableCellVerticalAlignment.top,
         children: [
-          pw.TableRow(
-            children: [
-              pw.Padding(
-                padding: const pw.EdgeInsets.fromLTRB(12, 9, 12, 10),
-                child: left,
-              ),
-              pw.Padding(
-                padding: const pw.EdgeInsets.fromLTRB(12, 9, 12, 10),
-                child: right,
-              ),
-            ],
-          ),
+          pw.Padding(padding: boxPadding, child: left),
+          pw.Padding(padding: boxPadding, child: right),
         ],
-      );
+      ),
+    ],
+  );
+
+  /// The business address as one line that wraps to at most two
+  /// (CR-25 change 11). Older profiles have only the free-text address.
+  String get businessAddress {
+    final line1 = (profile['addressLine1'] ?? '').trim();
+    if (line1.isEmpty) {
+      return (profile['address'] ?? '')
+          .split(RegExp(r'\s*\n\s*'))
+          .where((part) => part.trim().isNotEmpty)
+          .join(', ');
+    }
+    return composeBusinessAddress(
+      line1: line1,
+      line2: profile['addressLine2'] ?? '',
+      landmark: profile['landmark'] ?? '',
+      city: profile['city'] ?? '',
+      district: profile['district'] ?? '',
+      state: businessState,
+      pincode: profile['pincode'] ?? '',
+    );
+  }
 
   // 2. Header -------------------------------------------------------------
   pw.Widget header() {
@@ -289,11 +319,9 @@ class _Layout {
       if ((profile['phone'] ?? '').trim().isNotEmpty)
         'Mobile: ${profile['phone']!.trim()}',
     ].join(' · ');
-    final state = businessState.isEmpty
-        ? ''
-        : 'State: ${stateWithCode(businessState)}';
+    final address = businessAddress;
     return pw.Container(
-      padding: const pw.EdgeInsets.only(bottom: 10),
+      padding: const pw.EdgeInsets.only(bottom: 8),
       decoration: pw.BoxDecoration(
         border: pw.Border(bottom: pw.BorderSide(color: ink, width: 1.6)),
       ),
@@ -302,8 +330,8 @@ class _Layout {
         children: [
           if (logo != null) ...[
             pw.Container(
-              width: 70,
-              height: 70,
+              width: 60,
+              height: 60,
               alignment: pw.Alignment.center,
               child: pw.Image(logo!, fit: pw.BoxFit.contain),
             ),
@@ -323,22 +351,12 @@ class _Layout {
                   ),
                 ),
                 pw.SizedBox(height: 4),
+                if (address.isNotEmpty) pw.Text(address, maxLines: 2),
                 if (data.gstDocument && gstin.isNotEmpty)
-                  pw.RichText(
-                    text: pw.TextSpan(
-                      children: [
-                        pw.TextSpan(
-                          text: 'GSTIN: $gstin',
-                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-                        ),
-                        if (state.isNotEmpty) pw.TextSpan(text: ' · $state'),
-                      ],
-                    ),
-                  )
-                else if (state.isNotEmpty)
-                  pw.Text(state),
-                if ((profile['address'] ?? '').trim().isNotEmpty)
-                  pw.Text(profile['address']!.trim()),
+                  pw.Text(
+                    'GSTIN: $gstin',
+                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                  ),
                 if (contact.isNotEmpty) pw.Text(contact),
               ],
             ),
@@ -398,7 +416,7 @@ class _Layout {
           ),
           if (data.customerAddress.trim().isNotEmpty)
             pw.Text(data.customerAddress.trim()),
-          if (data.customerGstin.trim().isNotEmpty)
+          if (data.gstDocument && data.customerGstin.trim().isNotEmpty)
             pw.Text('GSTIN: ${data.customerGstin.trim().toUpperCase()}'),
           if (data.customerPhone.trim().isNotEmpty)
             pw.Text('Phone: ${data.customerPhone.trim()}'),
@@ -414,7 +432,7 @@ class _Layout {
               '${data.isQuotation ? 'Valid until' : 'Due date'}: '
               '${displayDate(data.secondDate)}',
             ),
-          if (data.placeOfSupply.trim().isNotEmpty)
+          if (data.gstDocument && data.placeOfSupply.trim().isNotEmpty)
             pw.Text('Place of supply: ${stateWithCode(data.placeOfSupply)}'),
         ],
       ),
@@ -512,10 +530,7 @@ class _Layout {
           pw.TableRow(
             children: [
               _cell('${index + 1}'),
-              _cell(
-                item.description.trim().isEmpty ? '-' : item.description,
-                sub: item.note,
-              ),
+              _cell(item.description.trim().isEmpty ? '-' : item.description),
               if (gst) _cell(item.hsn, align: pw.TextAlign.center),
               _cell(
                 [
@@ -681,38 +696,53 @@ class _Layout {
               if (ifsc.isNotEmpty) pw.Text('IFSC: ${ifsc.toUpperCase()}'),
             ],
           );
+    // QR on the left, four lines of text on the right, top edges aligned and
+    // nothing under the QR, so this half is no taller than the bank details.
     final upiBlock = qr == null
         ? null
         : pw.Row(
-            crossAxisAlignment: pw.CrossAxisAlignment.center,
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              pw.Column(
-                children: [
-                  pw.Container(
-                    width: 70,
-                    height: 70,
-                    color: PdfColors.white,
-                    padding: const pw.EdgeInsets.all(3),
-                    child: pw.Image(qr!, fit: pw.BoxFit.contain),
-                  ),
-                  if (upiLogo != null) ...[
-                    pw.SizedBox(height: 4),
-                    pw.Image(upiLogo!, width: 64, fit: pw.BoxFit.contain),
-                  ],
-                ],
+              pw.Container(
+                width: 58,
+                height: 58,
+                color: PdfColors.white,
+                padding: const pw.EdgeInsets.all(3),
+                child: pw.Image(qr!, fit: pw.BoxFit.contain),
               ),
-              pw.SizedBox(width: 12),
+              pw.SizedBox(width: 10),
               pw.Expanded(
                 child: pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
-                    pw.Text('Scan to pay through UPI', style: label),
+                    pw.Row(
+                      children: [
+                        if (upiLogo != null) ...[
+                          pw.Image(
+                            upiLogo!,
+                            height: 11,
+                            fit: pw.BoxFit.contain,
+                          ),
+                          pw.SizedBox(width: 5),
+                        ],
+                        pw.Expanded(
+                          child: pw.Text(
+                            'Scan to pay through UPI',
+                            style: label,
+                            maxLines: 1,
+                          ),
+                        ),
+                      ],
+                    ),
                     if (data.balanceDue > 0)
                       pw.Text('Amount: ${rupees(data.balanceDue)}'),
-                    if (upi.isNotEmpty) ...[
-                      pw.Text('UPI ID:'),
-                      pw.Text(upi.toLowerCase()),
-                    ],
+                    if (upi.isNotEmpty)
+                      // One line, never split: a long ID shrinks a little.
+                      pw.FittedBox(
+                        fit: pw.BoxFit.scaleDown,
+                        alignment: pw.Alignment.centerLeft,
+                        child: pw.Text('UPI ID: ${upi.toLowerCase()}'),
+                      ),
                   ],
                 ),
               ),
@@ -721,7 +751,22 @@ class _Layout {
     if (bank == null && upiBlock == null) return null;
     if (bank == null) return _box(upiBlock!);
     if (upiBlock == null) return _box(bank);
-    return _split(bank, upiBlock);
+    return _split(bank, upiBlock, middle: true);
+  }
+
+  // 6b. Description (CR-25 change 9) -------------------------------------
+  pw.Widget? descriptionBox() {
+    final description = data.description.trim();
+    if (description.isEmpty) return null;
+    return _box(
+      pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text('Description', style: label),
+          pw.Text(description, maxLines: 3),
+        ],
+      ),
+    );
   }
 
   // 7. Terms and signature -------------------------------------------------
@@ -767,7 +812,7 @@ class _Layout {
     final tagline = (profile['tagline'] ?? profile['website'] ?? '').trim();
     return pw.Container(
       width: double.infinity,
-      padding: const pw.EdgeInsets.only(top: 10),
+      padding: const pw.EdgeInsets.only(top: 6),
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.center,
         children: [
