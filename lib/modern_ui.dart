@@ -695,45 +695,45 @@ class ModernOverview extends StatelessWidget {
           if (error != null) _errorCard(),
           IntrinsicHeight(
             child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                child: _MoneyCard(
-                  outstanding: _figure(outstanding),
-                  unpaidCount: unpaidCount,
-                  loading: loading,
-                  compact: true,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: _MoneyCard(
+                    outstanding: _figure(outstanding),
+                    unpaidCount: unpaidCount,
+                    loading: loading,
+                    compact: true,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: _WideStat(
-                  label: 'Total sales',
-                  value: _figure(sales),
-                  note: '$invoiceCount invoices',
+                const SizedBox(width: 14),
+                Expanded(
+                  child: _WideStat(
+                    label: 'Total sales',
+                    value: _figure(sales),
+                    note: '$invoiceCount invoices',
+                  ),
                 ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: _WideStat(
-                  label: 'Collected',
-                  value: _figure(collected ?? '—'),
-                  tone: TileTone.sky,
+                const SizedBox(width: 14),
+                Expanded(
+                  child: _WideStat(
+                    label: 'Collected',
+                    value: _figure(collected ?? '—'),
+                    tone: TileTone.sky,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: _WideStat(
-                  label: 'Invoices',
-                  value: _figure(invoiceCount),
-                  note: partlyPaidCount == null
-                      ? null
-                      : '$partlyPaidCount partly paid',
-                  tone: TileTone.orange,
+                const SizedBox(width: 14),
+                Expanded(
+                  child: _WideStat(
+                    label: 'Invoices',
+                    value: _figure(invoiceCount),
+                    note: partlyPaidCount == null
+                        ? null
+                        : '$partlyPaidCount partly paid',
+                    tone: TileTone.orange,
+                  ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
           ),
           const SizedBox(height: 18),
           Row(
