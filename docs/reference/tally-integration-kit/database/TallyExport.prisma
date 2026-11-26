@@ -1,0 +1,8 @@
+model TallyExport {
+  guid            String   @id
+  kind            String
+  number          String
+  firstExportedAt DateTime @default(now())
+  lastExportedAt  DateTime @default(now())
+  count           Int      @default(1)
+}
