@@ -226,13 +226,13 @@ language sql
 stable
 security definer
 set search_path = public
-as $
+as $$
   select lower(btrim(i.customer_name)), sum(i.balance_amount)
   from public.counted_invoices(null, null) i
   where lower(btrim(i.customer_name)) = any(
     select lower(btrim(n)) from unnest(p_names) as n)
   group by 1;
-$;
+$$;
 
 do $$
 declare
