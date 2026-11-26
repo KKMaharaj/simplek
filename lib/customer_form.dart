@@ -8,7 +8,15 @@ part of 'main.dart';
 //   from the GSTIN. There is no State field.
 
 class CustomerFormDialog extends StatefulWidget {
-  const CustomerFormDialog({super.key, this.customer, this.initialName});
+  const CustomerFormDialog({
+    super.key,
+    this.customer,
+    this.initialName,
+    this.asSheet = false,
+  });
+
+  /// Shown as a bottom sheet (phones) instead of a dialog.
+  final bool asSheet;
 
   final Map<String, dynamic>? customer;
   final String? initialName;
@@ -256,6 +264,7 @@ class _CustomerFormDialogState extends State<CustomerFormDialog> {
 
   @override
   Widget build(BuildContext context) => _FormDialogFrame(
+    asSheet: widget.asSheet,
     title: _isEditing ? 'Edit customer' : 'New customer',
     form: Form(
       key: _formKey,
@@ -296,11 +305,13 @@ class _CustomerFormDialogState extends State<CustomerFormDialog> {
 /// field is never hidden or cut (CR-25 change 3).
 class _FormDialogFrame extends StatelessWidget {
   const _FormDialogFrame({
+    this.asSheet = false,
     required this.title,
     required this.form,
     required this.actions,
   });
 
+  final bool asSheet;
   final String title;
   final Widget form;
   final List<Widget> actions;
@@ -308,6 +319,17 @@ class _FormDialogFrame extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
+    if (asSheet) {
+      return Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: size.height * 0.9),
+          child: _body(context),
+        ),
+      );
+    }
     return Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       clipBehavior: Clip.antiAlias,
@@ -316,38 +338,40 @@ class _FormDialogFrame extends StatelessWidget {
           maxWidth: 600,
           maxHeight: size.height * 0.85,
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 22, 24, 12),
-              child: Text(
-                title,
-                style: Theme.of(context).textTheme.titleLarge,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            Flexible(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(24, 4, 24, 16),
-                child: form,
-              ),
-            ),
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-              child: Wrap(
-                alignment: WrapAlignment.end,
-                spacing: 8,
-                runSpacing: 8,
-                children: actions,
-              ),
-            ),
-          ],
-        ),
+        child: _body(context),
       ),
     );
   }
+
+  Widget _body(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(24, 22, 24, 12),
+        child: Text(
+          title,
+          style: Theme.of(context).textTheme.titleLarge,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+      Flexible(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(24, 4, 24, 16),
+          child: form,
+        ),
+      ),
+      const Divider(height: 1),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        child: Wrap(
+          alignment: WrapAlignment.end,
+          spacing: 8,
+          runSpacing: 8,
+          children: actions,
+        ),
+      ),
+    ],
+  );
 }

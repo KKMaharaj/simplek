@@ -15,7 +15,9 @@ import 'package:simplek/main.dart';
 import 'package:simplek/modern_ui.dart';
 
 final _enabled = Platform.environment['SIMPLEK_SCREENSHOTS'] == '1';
-final _out = Platform.environment['SIMPLEK_SCREENSHOT_DIR'] ?? 'docs/screenshots/2026-11-25';
+final _out =
+    Platform.environment['SIMPLEK_SCREENSHOT_DIR'] ??
+    'docs/screenshots/2026-11-25';
 final _boundary = GlobalKey();
 
 Future<void> _loadFonts() async {
@@ -44,7 +46,9 @@ Future<void> _loadFonts() async {
     final loader = FontLoader(name)
       ..addFont(
         Future.value(
-          ByteData.sublistView(File('assets/fonts/$name.ttf').readAsBytesSync()),
+          ByteData.sublistView(
+            File('assets/fonts/$name.ttf').readAsBytesSync(),
+          ),
         ),
       );
     await loader.load();
@@ -139,9 +143,30 @@ void main() {
               loading: false,
               error: null,
               recent: const [
-                {'id': '1', 'number': 'INV/2026-27/24', 'customer': 'Principal JNNCE', 'amount': '₹10,600.21', 'status': 'sent', 'date': '19 Nov 2026'},
-                {'id': '2', 'number': 'INV/2026-27/23', 'customer': 'Kiran N P & Associates', 'amount': '₹3,276.00', 'status': 'paid', 'date': '18 Nov 2026'},
-                {'id': '3', 'number': 'INV/2026-27/22', 'customer': 'Pearlite Liners Pvt Ltd', 'amount': '₹2,205.00', 'status': 'partial', 'date': '14 Nov 2026'},
+                {
+                  'id': '1',
+                  'number': 'INV/2026-27/24',
+                  'customer': 'Principal JNNCE',
+                  'amount': '₹10,600.21',
+                  'status': 'sent',
+                  'date': '19 Nov 2026',
+                },
+                {
+                  'id': '2',
+                  'number': 'INV/2026-27/23',
+                  'customer': 'Kiran N P & Associates',
+                  'amount': '₹3,276.00',
+                  'status': 'paid',
+                  'date': '18 Nov 2026',
+                },
+                {
+                  'id': '3',
+                  'number': 'INV/2026-27/22',
+                  'customer': 'Pearlite Liners Pvt Ltd',
+                  'amount': '₹2,205.00',
+                  'status': 'partial',
+                  'date': '14 Nov 2026',
+                },
               ],
               onNewInvoice: () {},
               onNewQuotation: () {},

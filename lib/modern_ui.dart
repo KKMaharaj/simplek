@@ -545,7 +545,14 @@ class ModernOverview extends StatelessWidget {
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
                     const SizedBox(width: 10),
-                    Text('Search everything', style: theme.textTheme.bodySmall),
+                    Expanded(
+                      child: Text(
+                        'Search everything',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ),
                   ],
                 ),
               ),

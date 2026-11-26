@@ -3878,11 +3878,23 @@ Future<Map<String, dynamic>?> _showCustomerForm(
   Map<String, dynamic>? customer,
   String? initialName,
 }) async {
-  final saved = await showDialog<Map<String, dynamic>>(
-    context: context,
-    builder: (_) =>
-        CustomerFormDialog(customer: customer, initialName: initialName),
-  );
+  // A bottom sheet on phones, a dialog on wider screens (NewCustomer.png).
+  final saved = MediaQuery.sizeOf(context).width < 600
+      ? await showModalBottomSheet<Map<String, dynamic>>(
+          context: context,
+          isScrollControlled: true,
+          useSafeArea: true,
+          builder: (_) => CustomerFormDialog(
+            customer: customer,
+            initialName: initialName,
+            asSheet: true,
+          ),
+        )
+      : await showDialog<Map<String, dynamic>>(
+          context: context,
+          builder: (_) =>
+              CustomerFormDialog(customer: customer, initialName: initialName),
+        );
 
   if (saved != null && context.mounted) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -4336,7 +4348,7 @@ class _CustomerHistoryPageState extends State<CustomerHistoryPage> {
                                       'Invoice',
                                 ),
                                 subtitle: Text(
-                                  '${invoice['invoice_date'] ?? ''} • ${(invoice['status'] ?? 'draft').toString().toUpperCase()}',
+                                  '${screenDate(parseStoredDate(invoice['invoice_date']))} · ${(invoice['status'] ?? 'draft').toString().toUpperCase()}',
                                 ),
                                 trailing: Text(
                                   _money(_amount(invoice['total_amount'])),
@@ -4373,7 +4385,7 @@ class _CustomerHistoryPageState extends State<CustomerHistoryPage> {
                                       'Quotation',
                                 ),
                                 subtitle: Text(
-                                  '${quote['quotation_date'] ?? ''} • ${(quote['status'] ?? 'draft').toString().toUpperCase()}',
+                                  '${screenDate(parseStoredDate(quote['quotation_date']))} · ${(quote['status'] ?? 'draft').toString().toUpperCase()}',
                                 ),
                                 trailing: Text(
                                   _money(_amount(quote['total_amount'])),
@@ -4420,7 +4432,7 @@ class BusinessSettings {
     return 'business_invoice_theme_${user?.id ?? 'signed_out'}';
   }
 
-  static final themeMode = ValueNotifier(ThemeMode.system);
+  static final themeMode = ValueNotifier(ThemeMode.light);
 
   static Future<void> setThemeMode(ThemeMode mode) async {
     final preferences = await SharedPreferences.getInstance();
@@ -4430,6 +4442,7 @@ class BusinessSettings {
 
   static const _secureStorage = FlutterSecureStorage();
   static const _gstRegisteredKey = 'business_gst_registered';
+  static const _lightDefaultAppliedKey = 'app_theme_light_default_20261126';
   static const _defaultDueDayKey = 'business_default_due_day';
   static const _defaultTermsKey = 'business_default_terms';
   static const _quotationTermsKey = 'business_quotation_terms';
@@ -4560,9 +4573,15 @@ class BusinessSettings {
 
   static Future<void> load() async {
     final preferences = await SharedPreferences.getInstance();
+    // UI-25: light is the default, once, for new installs and for anyone on
+    // Auto or Dark before the redesign. A theme chosen after that is kept.
+    if (preferences.getBool(_lightDefaultAppliedKey) != true) {
+      await preferences.setString('app_theme_mode', ThemeMode.light.name);
+      await preferences.setBool(_lightDefaultAppliedKey, true);
+    }
     themeMode.value = ThemeMode.values.firstWhere(
       (mode) => mode.name == preferences.getString('app_theme_mode'),
-      orElse: () => ThemeMode.system,
+      orElse: () => ThemeMode.light,
     );
     final protectedValues = await Future.wait([
       _readProtected(preferences, _businessGstinKey),
@@ -5153,13 +5172,7 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: Text('Business Profile & Settings'),
-        ),
-      ),
+      appBar: _simplekAppBar(context, 'Settings'),
       body: ValueListenableBuilder<bool>(
         valueListenable: BusinessSettings.isGstRegistered,
         builder: (context, isGstRegistered, _) {
@@ -5169,47 +5182,36 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  Text(
-                    'Invoice colours',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 12),
+                  const SectionLabel('Invoice colour'),
                   Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: InvoicePalette.options
-                        .map(
-                          (palette) => ChoiceChip(
-                            label: Text(palette.label),
-                            avatar: CircleAvatar(
-                              backgroundColor: palette.inkColor,
-                              child: Icon(
-                                Icons.receipt_outlined,
-                                color: palette.paperColor,
-                                size: 18,
-                              ),
-                            ),
-                            selected: _invoiceTheme == palette.id,
-                            onSelected: (_) =>
-                                setState(() => _invoiceTheme = palette.id),
-                          ),
-                        )
-                        .toList(),
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      for (final palette in InvoicePalette.options)
+                        _ColourSwatch(
+                          palette: palette,
+                          selected: _invoiceTheme == palette.id,
+                          onTap: () =>
+                              setState(() => _invoiceTheme = palette.id),
+                        ),
+                    ],
                   ),
                   const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    onPressed: _previewInvoiceTheme,
-                    icon: const Icon(Icons.preview_outlined),
-                    label: const Text('Preview invoice format'),
+                  Text(
+                    '${InvoicePalette.resolve(_invoiceTheme).label}. Save the profile to use it on your invoices.',
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
-                  const Text(
-                    'Save business profile to use this format for your invoices.',
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      onPressed: _previewInvoiceTheme,
+                      icon: const Icon(Icons.visibility_outlined),
+                      label: const Text('Preview a sample invoice'),
+                    ),
                   ),
                   const SizedBox(height: 24),
-                  Text(
-                    'Business details',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
+                  SectionLabel('Business details'),
                   const SizedBox(height: 12),
                   _labeledText(
                     _ownerController,
@@ -5260,10 +5262,7 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
                     },
                   ),
                   const SizedBox(height: 20),
-                  Text(
-                    'Tax and numbering',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
+                  SectionLabel('Tax and numbering'),
                   const SizedBox(height: 12),
                   const FieldLabel(
                     'Is your business registered under GST?',
@@ -5362,10 +5361,7 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
                     _quotationPrefixController,
                   ]),
                   const SizedBox(height: 20),
-                  Text(
-                    'Business address',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
+                  SectionLabel('Business address'),
                   const SizedBox(height: 8),
                   if (_addressNeedsCompleting)
                     Container(
@@ -5397,10 +5393,7 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
                         : null,
                   ),
                   const SizedBox(height: 20),
-                  Text(
-                    'Invoice branding',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
+                  SectionLabel('Invoice branding'),
                   const SizedBox(height: 8),
                   _brandingTiles(),
                   const SizedBox(height: 6),
@@ -5438,10 +5431,7 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
                     ),
                   ],
                   const SizedBox(height: 20),
-                  Text(
-                    'Bank details',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
+                  SectionLabel('Bank details'),
                   const SizedBox(height: 12),
                   _profileField(
                     _ifscController,
@@ -5616,29 +5606,43 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
                     ),
                   ),
                   const SizedBox(height: 28),
-                  const Divider(),
-                  const SizedBox(height: 16),
-                  Text(
-                    'App preferences',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'These apply to this device only.',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 12),
-                  Text('Theme', style: Theme.of(context).textTheme.bodyMedium),
-                  const SizedBox(height: 8),
-                  ValueListenableBuilder<ThemeMode>(
-                    valueListenable: BusinessSettings.themeMode,
-                    builder: (context, mode, _) => ThemeModeToggle(
-                      mode: mode,
-                      onChanged: BusinessSettings.setThemeMode,
+                  const SectionLabel('App preferences'),
+                  SectionCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.palette_outlined,
+                              size: 20,
+                              color: Theme.of(context).colorScheme.onSurface,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Theme',
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        ValueListenableBuilder<ThemeMode>(
+                          valueListenable: BusinessSettings.themeMode,
+                          builder: (context, mode, _) => ThemeModeToggle(
+                            mode: mode,
+                            onChanged: BusinessSettings.setThemeMode,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'These apply to this device only.',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        const SizedBox(height: 8),
+                        const AppLockSetting(),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  const AppLockSetting(),
                   const SizedBox(height: 24),
                   const VersionLine(),
                   const SizedBox(height: 16),
@@ -11531,4 +11535,76 @@ class _HsnSacSelection extends StatelessWidget {
       ),
     );
   }
+}
+
+/// One invoice colour scheme as a square: paper colour with an ink swatch,
+/// an orange border and tick when chosen (Settings.png).
+class _ColourSwatch extends StatelessWidget {
+  const _ColourSwatch({
+    required this.palette,
+    required this.selected,
+    required this.onTap,
+  });
+  final InvoicePalette palette;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: palette.label,
+    child: Semantics(
+      selected: selected,
+      label: palette.label,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Pressable(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(14),
+            color: palette.paperColor,
+            child: Container(
+              width: 54,
+              height: 54,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: selected
+                      ? SimplekColors.orange
+                      : Theme.of(context).colorScheme.outlineVariant,
+                  width: selected ? 2.5 : 1,
+                ),
+              ),
+              child: Container(
+                width: 26,
+                height: 26,
+                decoration: BoxDecoration(
+                  color: palette.inkColor,
+                  borderRadius: BorderRadius.circular(7),
+                ),
+              ),
+            ),
+          ),
+          if (selected)
+            Positioned(
+              right: -5,
+              top: -5,
+              child: Container(
+                width: 20,
+                height: 20,
+                decoration: const BoxDecoration(
+                  color: SimplekColors.orange,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.check,
+                  size: 13,
+                  color: SimplekColors.navy,
+                ),
+              ),
+            ),
+        ],
+      ),
+    ),
+  );
 }
