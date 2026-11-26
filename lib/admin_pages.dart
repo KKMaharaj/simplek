@@ -2913,6 +2913,8 @@ class _AdminAuditPageState extends State<AdminAuditPage> {
     'plan_saved',
     'access_given',
     'access_removed',
+    'tally_rename',
+    'tally_export',
   ];
 
   @override

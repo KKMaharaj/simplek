@@ -47,6 +47,7 @@ part 'server_lists.dart';
 part 'privacy_pages.dart';
 part 'session.dart';
 part 'admin_pages.dart';
+part 'tally_pages.dart';
 
 final invoiceChanges = ValueNotifier<int>(0);
 
@@ -6019,6 +6020,24 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
                     ),
                   ),
                   const SizedBox(height: 24),
+                  const SectionLabel('Tally'),
+                  RowGroup(
+                    children: [
+                      ListRowTile(
+                        leading: const IconTile(
+                          Icons.account_balance_outlined,
+                          size: 40,
+                        ),
+                        title: 'Tally settings',
+                        subtitle:
+                            'Company and ledger names used in the Tally file',
+                        showChevron: true,
+                        onTap: () =>
+                            _openPage(context, const TallySettingsPage()),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
                   const SectionLabel('Your plan'),
                   const PlanCard(),
                   const SizedBox(height: 24),
@@ -7124,43 +7143,6 @@ class _ReportsPageState extends State<ReportsPage> {
     );
   }
 
-  String _xml(dynamic value) => (value?.toString() ?? '')
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&apos;');
-
-  Future<void> _exportTallyXml(List<Map<String, dynamic>> invoices) async {
-    final company = BusinessSettings.profile.value['name'] ?? 'Simplek';
-    final vouchers = invoices.map((invoice) {
-      return '''<TALLYMESSAGE xmlns:UDF="TallyUDF">
-<VOUCHER VCHTYPE="Sales" ACTION="Create">
-<DATE>${_xml(invoice['invoice_date']?.toString().replaceAll('-', ''))}</DATE>
-<VOUCHERTYPENAME>Sales</VOUCHERTYPENAME>
-<VOUCHERNUMBER>${_xml(invoice['invoice_number'])}</VOUCHERNUMBER>
-<PARTYLEDGERNAME>${_xml(invoice['customer_name'])}</PARTYLEDGERNAME>
-${_gst ? '<PARTYGSTIN>${_xml(invoice['customer_gstin'])}</PARTYGSTIN>\n<PLACEOFSUPPLY>${_xml(invoice['place_of_supply'])}</PLACEOFSUPPLY>\n' : ''}<AMOUNT>${Paise.parse(invoice['total_amount']).inRupees.toStringAsFixed(2)}</AMOUNT>
-</VOUCHER></TALLYMESSAGE>''';
-    }).join();
-    // The filter and date as an XML comment ("--" is not allowed inside).
-    final title = _exportTitle(
-      invoices.length,
-    ).map((line) => _xml(line).replaceAll('--', '–')).join('\n     ');
-    final document =
-        '''<?xml version="1.0" encoding="UTF-8"?>
-<!-- $title -->
-<ENVELOPE><HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER>
-<BODY><IMPORTDATA><REQUESTDESC><REPORTNAME>Vouchers</REPORTNAME>
-<STATICVARIABLES><SVCURRENTCOMPANY>${_xml(company)}</SVCURRENTCOMPANY></STATICVARIABLES>
-</REQUESTDESC><REQUESTDATA>$vouchers</REQUESTDATA></IMPORTDATA></BODY></ENVELOPE>''';
-    await _shareExport(
-      utf8.encode(document),
-      filename: 'simplek_tally_sales_$_periodSlug.xml',
-      mimeType: 'application/xml',
-    );
-  }
-
   Future<void> _exportPdf(List<Map<String, dynamic>> invoices) async {
     final title = _exportTitle(invoices.length);
     final document = pw.Document();
@@ -7221,8 +7203,6 @@ ${_gst ? '<PARTYGSTIN>${_xml(invoice['customer_gstin'])}</PARTYGSTIN>\n<PLACEOFS
           await _exportExcel(invoices);
         case 'pdf':
           await _exportPdf(invoices);
-        case 'xml':
-          await _exportTallyXml(invoices);
       }
     } catch (error) {
       if (mounted) {
@@ -7249,7 +7229,11 @@ ${_gst ? '<PARTYGSTIN>${_xml(invoice['customer_gstin'])}</PARTYGSTIN>\n<PLACEOFS
           Flexible(child: Text(label, maxLines: 1)),
         ],
       );
-      final onPressed = _exporting ? null : () => _export(format);
+      final onPressed = _exporting
+          ? null
+          : format == 'tally'
+          ? () => _openPage(context, TallyExportPage(period: _period))
+          : () => _export(format);
       return Expanded(
         child: strong
             ? ElevatedButton(onPressed: onPressed, child: child)
@@ -7270,14 +7254,16 @@ ${_gst ? '<PARTYGSTIN>${_xml(invoice['customer_gstin'])}</PARTYGSTIN>\n<PLACEOFS
                 PopupMenuButton<String>(
                   tooltip: 'Export report',
                   enabled: !_exporting,
-                  onSelected: _export,
+                  onSelected: (format) => format == 'tally'
+                      ? _openPage(context, TallyExportPage(period: _period))
+                      : _export(format),
                   itemBuilder: (_) => const [
                     PopupMenuItem(value: 'pdf', child: Text('Export PDF')),
                     PopupMenuItem(value: 'xlsx', child: Text('Export Excel')),
                     PopupMenuItem(value: 'csv', child: Text('Export CSV')),
                     PopupMenuItem(
-                      value: 'xml',
-                      child: Text('Export TallyPrime XML'),
+                      value: 'tally',
+                      child: Text('Export for Tally'),
                     ),
                   ],
                   child: Container(
@@ -7323,7 +7309,7 @@ ${_gst ? '<PARTYGSTIN>${_xml(invoice['customer_gstin'])}</PARTYGSTIN>\n<PLACEOFS
                           const SizedBox(width: 8),
                           exportButton('xlsx', 'Excel'),
                           const SizedBox(width: 8),
-                          exportButton('xml', 'Tally', strong: true),
+                          exportButton('tally', 'Tally', strong: true),
                         ],
                       ),
                       const SizedBox(height: 6),
