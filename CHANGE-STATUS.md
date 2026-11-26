@@ -96,3 +96,23 @@ sign-ups, 0 exports).
 | B5 | Download my backup on More → Sync and backup, with the last download date on this device | Done; **Needs hand test** | SYNC-008 |
 | — | Test plan: 27 new cases; Known Issues KI-01/KI-02 marked fixed | Done | `docs/Simplek_Test_Plan.xlsx` |
 | — | Version 1.5.0 (build 20261128) | Done; APK not built yet | Login screen; Settings |
+
+## Change request of 26 Nov 2026: login, sign-up, log-out and fingerprint fixes (`docs/CHANGE_REQUEST_2026-11-26_LOGIN_FIXES.md`)
+
+In version 1.5.0 (build 20261128), with part B. No database change.
+
+| # | Change | Status | Where to check |
+|---|---|---|---|
+| L1 | Fingerprint only when the app opens with a saved login or after 45 s in the background; never after a password or email-link login; per account; offer once per account; no "Log in with password instead" loop | Done (widget tests); **Needs hand test** on the phone (test 4 below) | `lib/app_lock.dart`; `test/login_fixes_test.dart` |
+| L2 | Pending sign-up kept with email and time; used only for that email, < 24 h, no password yet, from the email link; otherwise deleted; "Cancel and log out" on Set your password | Done (tests); **Needs hand test** (tests 3, 5) | `PendingSignup`, `pendingSignupApplies` |
+| L3 | `password_set` in metadata; an existing account gets "You already have a Simplek account. You're now logged in." and Home; set-up whenever an owner has no profile (not accountants with shared businesses); set-up never overwrites a saved profile; Log out on set-up; straight to Home after set-up | Done (tests for the rules); **Needs hand test** (tests 2, 5) | `isExistingAccount`, `needsBusinessSetup`, `_finish` |
+| L4 | One log-out for every button: warns about unsynced items (kept), logs out even offline, clears the old business profile, files, terms, view, choices and pending sign-up, closes every screen; a different account signing in clears the previous one first | Done (test: the next account sees a blank profile); **Needs hand test** (test 1) | `lib/session.dart` |
+| L5 | Plain sign-up email errors (rate limit, other); "Open the link on this phone…" | Done | Sign-up, Check your email |
+| L5 | Custom SMTP and redirect URLs in Supabase | **Owner's step** | `NOTES.md` |
+
+Hand tests on the phone (Android), from the change request:
+1. Log in as account A, log out → login screen; log in as B → none of A's business details.
+2. Start sign-up on the phone for an email that already has an account, tap the link on the phone → "You already have a Simplek account", Home; no password or set-up page; the profile is unchanged.
+3. Start sign-up on the phone, then log in as another account → normal Home, no "Set your password".
+4. Quick unlock on: password login → no fingerprint; close and reopen the app → fingerprint once.
+5. On "Set your password" and "Set up your business", Cancel and Log out work.
