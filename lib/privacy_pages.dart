@@ -8,8 +8,8 @@ part of 'main.dart';
 
 abstract final class PrivacyInfo {
   /// Changes when the notice or terms change; everyone accepts it once.
-  static const noticeVersion = '2026-11-27';
-  static const noticeLabel = 'Version 1.0, 27 November 2026';
+  static const noticeVersion = '2026-11-26';
+  static const noticeLabel = 'Version 1.0, 26 November 2026';
 
   // Replace before launch (NOTES.md): the owner's grievance contact.
   static const grievanceName = '[Grievance contact, to be added]';

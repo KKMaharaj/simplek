@@ -127,4 +127,4 @@ the new project; each ends in `rollback`, so they change nothing.
 
 | Date | Backup | Into | Result |
 |---|---|---|---|
-| 27 Nov 2026 | `backups/20261127_*` (local, the same three dump files) | — | Encrypt → decrypt round trip identical; row counts read correctly (37 invoices). **Full restore into a test Supabase project not done yet**: needs the owner's test project (`NOTES.md`). |
+| 26 Nov 2026 | `backups/20261127_*` (local, the same three dump files) | — | Encrypt → decrypt round trip identical; row counts read correctly (37 invoices). **Full restore into a test Supabase project not done yet**: needs the owner's test project (`NOTES.md`). |

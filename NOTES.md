@@ -110,7 +110,7 @@
   (`SIMPLEK_SCREENSHOTS=1`) with sample data and no network; screens that need
   a login (picker lists, saved invoices) are hand tests.
 
-### Part B (CR-25B), from 27 Nov 2026
+### Part B (CR-25B), from 26 Nov 2026
 
 - **B1 delete is a soft delete.** `invoices.deleted_at` / `deleted_by`; a
   restrictive SELECT policy hides deleted invoices (and, through it, their
@@ -148,7 +148,7 @@
   files and `purge_account` deletes every row and the login.
 - **B4 sign-ups never completed** = logins older than 30 days with no
   business profile, not an invited accountant and no deletion pending. On
-  27 Nov 2026 that was 0 of the 7 logins.
+  26 Nov 2026 that was 0 of the 7 logins.
 - **B3 on the server:** `save_invoice` works every amount out again. The app
   sends `money_rule: 'paise-v1'`; then any difference is refused ("…do not
   match the server's calculation. Update the app and try again."). Older app
@@ -156,4 +156,4 @@
   so they keep working and the database always follows the rule. In rare
   cases an older version's screen or PDF can then differ by a paisa (or a
   rupee at a round-off boundary) from what is stored, until it is updated.
-  Invoices saved before 27 Nov keep their stored amounts.
+  Invoices saved before 26 Nov keep their stored amounts.

@@ -62,7 +62,7 @@ Branch `cr-2026-11-25-standards`, version 1.5.0 (build 20261128). **Not on
 `master` yet: waiting for the owner's check with real data and approval of
 the screenshots.**
 
-Database, 27 Nov: backed up first (`backups/20261127_*`, 37 invoices, 31
+Database, 26 Nov: backed up first (`backups/20261127_*`, 37 invoices, 31
 customers, 32 items, 4 businesses; again as `backups/20261127b_*` before B4),
 each migration dry-run and rehearsed in a rolled-back transaction, then
 applied: `20261127000000` (B1), `…0001` (B3), `…0002` (B2), `…0003` (B4),

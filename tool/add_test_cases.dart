@@ -264,7 +264,7 @@ const _rows = <List<String>>[
     'Both',
     'Medium',
     'Existing users accept the updated notice once',
-    'An account created before 27 Nov 2026',
+    'An account created before 26 Nov 2026',
     '1. Log in.\n2. Accept.\n3. Log out and in again.',
     '-',
     "'We've updated our Privacy Notice' needs the tick and Accept; Log out "
@@ -468,13 +468,13 @@ void main() {
       xml = xml
           .replaceFirst(
             'Home totals add up only the newest 100 invoices.',
-            'Fixed on 27 Nov 2026 (CR-25B B2): Home totals now cover all '
+            'Fixed on 26 Nov 2026 (CR-25B B2): Home totals now cover all '
                 'invoices (was: only the newest 100).',
           )
           .replaceFirst(
             'Reports and GSTR-1 load only the newest 500 invoices / 5,000 line '
                 'items, so older periods can be incomplete.',
-            'Fixed on 27 Nov 2026 (CR-25B B2): Reports, GSTR-1 and exports '
+            'Fixed on 26 Nov 2026 (CR-25B B2): Reports, GSTR-1 and exports '
                 'now cover all invoices (was: the newest 500).',
           );
     }
