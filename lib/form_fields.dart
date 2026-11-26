@@ -192,12 +192,16 @@ class YesNoChoice extends StatelessWidget {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
             ),
             icon: selected
                 ? const Icon(Icons.check, color: SimplekColors.sky, size: 18)
                 : const SizedBox.shrink(),
-            label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+            // One line, never cut: a long label shrinks a little instead.
+            label: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(label, maxLines: 1),
+            ),
           ),
         ),
       );

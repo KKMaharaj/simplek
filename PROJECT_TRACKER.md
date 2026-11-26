@@ -332,3 +332,15 @@ session in tests).
   Fraunces/Inter/Noto Sans Kannada in `website/fonts/`, hero with the app and a
   sample invoice from made-up data (`test/website_sample_test.dart`).
 - Kannada checked on Windows Chrome; not yet checked on Android Chrome.
+
+## November 26 change request of 25 Nov (sign-up, customers, business GST rule)
+
+- On branch `cr-2026-11-25`, version 1.3.0 (build 20261126), waiting for the
+  owner's approval before `master`. Details per change in `CHANGE-STATUS.md`.
+- GST Yes/No buttons, capitals for PAN/IFSC/GSTIN, GSTIN check digit, state
+  picker without overlap, the business's GST status applied everywhere,
+  item/customer picker, no SKU, optional Description, compact one-page PDF,
+  address with PIN lookup, State and District.
+- Database backed up (`backups/20261126_*`), migrations `20261126000000` and
+  `20261126000001` applied, `pincode-lookup` edge function deployed.
+- District list still to import from the owner's LGD download.

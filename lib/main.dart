@@ -2331,6 +2331,15 @@ class _PasswordSetupPageState extends State<PasswordSetupPage> {
   );
 }
 
+/// The signed-in user's email, or '' before Supabase is ready.
+String _signedInEmail() {
+  try {
+    return Supabase.instance.client.auth.currentUser?.email ?? '';
+  } catch (_) {
+    return '';
+  }
+}
+
 class BusinessOnboardingPage extends StatefulWidget {
   const BusinessOnboardingPage({
     super.key,
@@ -2392,9 +2401,7 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
     _businessController = TextEditingController(text: widget.businessName);
     _gstinController = TextEditingController();
     _phoneController = TextEditingController(text: widget.mobile);
-    _emailController = TextEditingController(
-      text: Supabase.instance.client.auth.currentUser?.email ?? '',
-    );
+    _emailController = TextEditingController(text: _signedInEmail());
     _quotationTermsController = TextEditingController(
       text: _standardQuotationTerms,
     );
