@@ -16,6 +16,9 @@ import 'signature_pad.dart';
 import 'image_editor.dart';
 
 import 'app_version.dart';
+import 'date_presets.dart';
+import 'paging.dart';
+import 'url_state.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -38,6 +41,7 @@ part 'record_picker.dart';
 part 'customer_form.dart';
 part 'document_parts.dart';
 part 'invoice_delete.dart';
+part 'server_lists.dart';
 
 final invoiceChanges = ValueNotifier<int>(0);
 
@@ -304,6 +308,20 @@ class OfflineStore {
     await preferences.setString(_key(name), jsonEncode(rows));
   }
 
+  /// Adds the rows of a page the lists just loaded to the offline copy,
+  /// replacing rows with the same id and keeping the others, so search
+  /// still finds what was seen before while offline (CR-25B B2: lists load a
+  /// page at a time).
+  static Future<void> mergeCached(
+    String name,
+    List<Map<String, dynamic>> rows,
+  ) async {
+    final ids = {for (final row in rows) row['id']};
+    final cached = await readList(name);
+    cached.removeWhere((row) => ids.contains(row['id']));
+    await writeList(name, [...rows, ...cached]);
+  }
+
   static Future<void> addCached(String name, Map<String, dynamic> row) async {
     final rows = await readList(name);
     rows.removeWhere((item) => item['id'] == row['id']);
@@ -457,6 +475,7 @@ Future<void> main() async {
   await BusinessSettings.load();
   await AppLock.load();
   LiveSync.changes.addListener(() => invoiceChanges.value++);
+  _syncTabWithUrl();
 
   runApp(const MyApp());
 }
@@ -587,6 +606,7 @@ class _AuthGateState extends State<AuthGate> {
 
   Future<void> _refresh() async {
     LiveSync.sync();
+    await ListPrefs.load(Supabase.instance.client.auth.currentUser?.id);
     if (Supabase.instance.client.auth.currentSession != null) {
       unawaited(OfflineStore.syncAll());
       await BusinessAccess.restore();
@@ -3525,62 +3545,68 @@ class _GlobalSearchPageState extends State<GlobalSearchPage> {
       _error = null;
     });
     try {
+      // The server searches everything (CR-25B B2); the newest matches of
+      // each kind are shown.
+      final term = _searchTerm(query);
+      final client = Supabase.instance.client;
+      const each = 20;
       final data = await Future.wait([
-        Supabase.instance.client
+        client
             .from('customers')
             .select()
             .eq('is_active', true)
-            .limit(100),
-        Supabase.instance.client
+            .or(
+              _ilikeAny([
+                'name',
+                'phone',
+                'email',
+                if (BusinessSettings.isGstRegistered.value) 'gstin',
+              ], term),
+            )
+            .order('name')
+            .limit(each),
+        client
             .from('products')
             .select('id, name, product_type, hsn_sac_code, selling_price')
             .eq('is_active', true)
-            .limit(100),
-        Supabase.instance.client
+            .or(_ilikeAny(['name', 'product_type', 'hsn_sac_code'], term))
+            .order('name')
+            .limit(each),
+        client
             .from('invoices')
             .select(
               'id, invoice_number, customer_name, invoice_date, status, total_amount, description',
             )
+            .or(
+              _ilikeAny([
+                'invoice_number',
+                'customer_name',
+                'status',
+                'description',
+              ], term),
+            )
             .order('invoice_date', ascending: false)
-            .limit(100),
-        Supabase.instance.client
+            .limit(each),
+        client
             .from('quotations')
             .select(
               'id, quotation_number, customer_name, quotation_date, status, total_amount',
             )
+            .or(
+              _ilikeAny(['quotation_number', 'customer_name', 'status'], term),
+            )
             .order('quotation_date', ascending: false)
-            .limit(100),
+            .limit(each),
       ]).timeout(const Duration(seconds: 15));
-      final searchable = <Map<String, dynamic>>[];
-      void addMatches(dynamic rows, String type, List<String> fields) {
-        for (final raw in rows as List) {
-          final row = Map<String, dynamic>.from(raw as Map);
-          final text = fields
-              .map((field) => row[field]?.toString() ?? '')
-              .join(' ')
-              .toLowerCase();
-          if (text.contains(query)) searchable.add({...row, '_type': type});
-        }
-      }
-
-      addMatches(data[0], 'customer', [
-        'name',
-        'phone',
-        'email',
-        if (BusinessSettings.isGstRegistered.value) 'gstin',
-      ]);
-      addMatches(data[1], 'product', ['name', 'product_type', 'hsn_sac_code']);
-      addMatches(data[2], 'invoice', [
-        'invoice_number',
-        'customer_name',
-        'status',
-        'description',
-      ]);
-      addMatches(data[3], 'quotation', [
-        'quotation_number',
-        'customer_name',
-        'status',
-      ]);
+      final searchable = <Map<String, dynamic>>[
+        for (final (rows, type) in [
+          (data[0], 'customer'),
+          (data[1], 'product'),
+          (data[2], 'invoice'),
+          (data[3], 'quotation'),
+        ])
+          for (final row in rows) {...row, '_type': type},
+      ];
       if (mounted && query == _controller.text.trim().toLowerCase()) {
         setState(() => _results = searchable);
       }
@@ -3620,7 +3646,7 @@ class _GlobalSearchPageState extends State<GlobalSearchPage> {
     final page = switch (type) {
       'customer' => CustomerHistoryPage(customer: result),
       'product' => const ProductsPage(),
-      'invoice' => const InvoiceHistoryPage(),
+      'invoice' => InvoiceViewPage(invoiceId: result['id'].toString()),
       _ => const QuotationsPage(),
     };
     Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
@@ -3725,9 +3751,9 @@ class _DashboardPageState extends State<DashboardPage> {
   int _invoiceCount = 0;
   int _customerCount = 0;
   int _productCount = 0;
-  double _totalSales = 0;
-  double _outstanding = 0;
-  double _collected = 0;
+  Paise _totalSales = Paise.zero;
+  Paise _outstanding = Paise.zero;
+  Paise _collected = Paise.zero;
   int _unpaidCount = 0;
   int _partlyPaidCount = 0;
   List<Map<String, dynamic>> _recentInvoices = [];
@@ -3757,53 +3783,44 @@ class _DashboardPageState extends State<DashboardPage> {
       });
     }
     try {
-      final results = await Future.wait([
-        Supabase.instance.client
+      // Totals over all invoices are worked out on the server (CR-25B B2);
+      // only the five newest invoices are loaded for "Recent".
+      final client = Supabase.instance.client;
+      final results = await Future.wait<Object?>([
+        _Totals.load(),
+        client
             .from('invoices')
             .select(
-              'id, invoice_number, customer_name, invoice_date, status, total_amount, balance_amount, paid_amount',
+              'id, invoice_number, customer_name, invoice_date, status, total_amount',
             )
             .neq('status', 'draft')
             .neq('status', 'cancelled')
             .order('invoice_date', ascending: false)
             .order('created_at', ascending: false)
-            .limit(100),
-        Supabase.instance.client
+            .limit(5),
+        client
             .from('customers')
             .select('id')
-            .eq('is_active', true),
-        Supabase.instance.client
+            .eq('is_active', true)
+            .count(CountOption.exact),
+        client
             .from('products')
             .select('id')
-            .eq('is_active', true),
+            .eq('is_active', true)
+            .count(CountOption.exact),
       ]).timeout(const Duration(seconds: 15));
-      final invoices = List<Map<String, dynamic>>.from(results[0] as List);
-      final customers = List<Map<String, dynamic>>.from(results[1] as List);
-      var totalSales = 0.0;
-      var outstanding = 0.0;
-      var collected = 0.0;
-      var unpaid = 0;
-      var partlyPaid = 0;
-      for (final invoice in invoices) {
-        if (invoice['status']?.toString() != 'cancelled') {
-          totalSales += _asDouble(invoice['total_amount']);
-          outstanding += _asDouble(invoice['balance_amount']);
-          collected += _asDouble(invoice['paid_amount']);
-          if (_asDouble(invoice['balance_amount']) > 0) unpaid++;
-          if (invoice['status']?.toString() == 'partial') partlyPaid++;
-        }
-      }
+      final totals = results[0] as _Totals;
       if (!mounted || request != _summaryRequest) return;
       setState(() {
-        _invoiceCount = invoices.length;
-        _customerCount = customers.length;
-        _productCount = (results[2] as List).length;
-        _totalSales = totalSales;
-        _outstanding = outstanding;
-        _collected = collected;
-        _unpaidCount = unpaid;
-        _partlyPaidCount = partlyPaid;
-        _recentInvoices = invoices.take(5).toList();
+        _invoiceCount = totals.count('invoice_count');
+        _customerCount = (results[2] as PostgrestResponse).count;
+        _productCount = (results[3] as PostgrestResponse).count;
+        _totalSales = totals.money('total_sales');
+        _outstanding = totals.money('to_collect');
+        _collected = totals.money('collected');
+        _unpaidCount = totals.count('unpaid_count');
+        _partlyPaidCount = totals.count('partly_paid_count');
+        _recentInvoices = List<Map<String, dynamic>>.from(results[1] as List);
       });
     } catch (error) {
       if (mounted && request == _summaryRequest) {
@@ -3816,11 +3833,7 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  String _money(double amount) => rupees(amount);
-
-  double _asDouble(dynamic value) => value is num
-      ? value.toDouble()
-      : double.tryParse(value?.toString() ?? '') ?? 0;
+  String _money(Paise amount) => rupees(amount.inRupees);
 
   @override
   Widget build(BuildContext context) {
@@ -3842,7 +3855,7 @@ class _DashboardPageState extends State<DashboardPage> {
                   'id': row['id']?.toString() ?? '',
                   'number': row['invoice_number']?.toString() ?? 'Invoice',
                   'customer': row['customer_name']?.toString() ?? '',
-                  'amount': _money(_asDouble(row['total_amount'])),
+                  'amount': _money(Paise.parse(row['total_amount'])),
                   'status': row['status']?.toString() ?? 'draft',
                   'date': screenDate(parseStoredDate(row['invoice_date'])),
                 },
@@ -3913,37 +3926,70 @@ class CustomersPage extends StatefulWidget {
   State<CustomersPage> createState() => _CustomersPageState();
 }
 
-class _CustomersPageState extends State<CustomersPage> {
-  final _searchController = TextEditingController();
-  List<Map<String, dynamic>> _customers = [];
-  bool _isLoading = true;
-  String? _errorMessage;
+class _CustomersPageState extends State<CustomersPage>
+    with _ServerList<CustomersPage> {
+  static const _sorts = [('newest', 'Newest first'), ('name', 'Name A–Z')];
+
+  String _sort = 'newest';
   bool _showingCached = false;
+  int _customerCount = 0;
+  _Totals _totals = _Totals.empty;
+
+  /// What the customers on this page still owe, by lower-case name
+  /// (invoices store the name).
+  Map<String, Paise> _dues = const {};
+
+  @override
+  String get urlTab => 'customers';
+
+  @override
+  Map<String, String> get urlFilters => {
+    'sort': _sort == 'newest' ? '' : _sort,
+  };
+
+  @override
+  void readUrlFilters(Map<String, String> params) {
+    _sort = params['sort'] == 'name' ? 'name' : 'newest';
+  }
 
   @override
   void initState() {
     super.initState();
-    _searchController.addListener(_applySearch);
-    _loadCustomers();
-    _loadDues();
-    LiveSync.changes.addListener(_loadCustomers);
+    initServerList();
+    invoiceChanges.addListener(_loadTotals);
+    _loadTotals();
   }
 
   @override
   void dispose() {
-    _searchController
-      ..removeListener(_applySearch)
-      ..dispose();
-    LiveSync.changes.removeListener(_loadCustomers);
+    invoiceChanges.removeListener(_loadTotals);
+    disposeServerList();
     super.dispose();
   }
 
-  Future<void> _loadCustomers() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
+  Future<void> _loadTotals() async {
+    try {
+      final results = await Future.wait<Object>([
+        _Totals.load(),
+        Supabase.instance.client
+            .from('customers')
+            .select('id')
+            .eq('is_active', true)
+            .count(CountOption.exact),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _totals = results[0] as _Totals;
+        _customerCount = (results[1] as PostgrestResponse).count;
+      });
+    } catch (_) {
+      // The tiles keep their last values.
+    }
+  }
 
+  @override
+  Future<PageResult> fetchPage(int from, int to) async {
+    final term = _searchTerm(search.text);
     try {
       await OfflineStore.flush('customers', 'customers');
       if (mounted) {
@@ -3955,85 +4001,89 @@ class _CustomersPageState extends State<CustomersPage> {
           ),
         );
       }
-      final rows = await Supabase.instance.client
+      var query = Supabase.instance.client
           .from('customers')
           .select()
-          .eq('is_active', true)
-          .order('created_at', ascending: false);
-      if (!mounted) return;
-      final customers = List<Map<String, dynamic>>.from(rows);
-      await OfflineStore.writeList('customers', customers);
-      setState(() {
-        _customers = customers;
-        _showingCached = false;
-        _isLoading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      final cached = await OfflineStore.readList('customers');
-      setState(() {
-        _customers = cached;
-        _showingCached = cached.isNotEmpty;
-        _errorMessage = cached.isEmpty ? 'Unable to load customers: $e' : null;
-        _isLoading = false;
-      });
+          .eq('is_active', true);
+      if (term.isNotEmpty) {
+        query = query.or(
+          _ilikeAny([
+            'name',
+            'phone',
+            'email',
+            if (BusinessSettings.isGstRegistered.value) 'gstin',
+          ], term),
+        );
+      }
+      final page = await _pageOf(
+        _sort == 'name'
+            ? query.order('name', ascending: true)
+            : query.order('created_at', ascending: false),
+        from,
+        to,
+      );
+      unawaited(OfflineStore.mergeCached('customers', page.rows));
+      unawaited(_loadDues(page.rows));
+      _showingCached = false;
+      return page;
+    } catch (error) {
+      // Offline: the customers this device has seen, filtered here.
+      if (from != 0) rethrow;
+      final cached = (await OfflineStore.readList('customers')).where((row) {
+        if (term.isEmpty) return true;
+        final query = term.toLowerCase();
+        return [
+          row['name'],
+          row['phone'],
+          row['email'],
+          row['gstin'],
+        ].whereType<String>().any((v) => v.toLowerCase().contains(query));
+      }).toList();
+      if (cached.isEmpty) rethrow;
+      _showingCached = true;
+      return PageResult(cached, cached.length);
     }
   }
 
-  void _applySearch() {
-    if (mounted) setState(() {});
-  }
-
-  List<Map<String, dynamic>> get _visibleCustomers {
-    final query = _searchController.text.trim().toLowerCase();
-    if (query.isEmpty) return _customers;
-    return _customers.where((customer) {
-      return [
-        customer['name'],
-        customer['phone'],
-        customer['email'],
-        customer['gstin'],
-      ].whereType<String>().any((value) => value.toLowerCase().contains(query));
-    }).toList();
-  }
-
-  Future<void> _addCustomer() async {
-    final saved = await _showCustomerForm(context);
-    if (saved != null) await _loadCustomers();
-  }
-
-  Future<void> _editCustomer(Map<String, dynamic> customer) async {
-    final saved = await _showCustomerForm(context, customer: customer);
-    if (saved != null) await _loadCustomers();
-  }
-
-  /// What each customer still owes, by name (invoices store the name).
-  Map<String, double> _dues = const {};
-
-  Future<void> _loadDues() async {
+  Future<void> _loadDues(List<Map<String, dynamic>> customers) async {
+    final names = [
+      for (final customer in customers)
+        if ((customer['name'] as String?)?.trim().isNotEmpty ?? false)
+          customer['name'] as String,
+    ];
+    if (names.isEmpty) return;
     try {
-      final rows = await Supabase.instance.client
-          .from('invoices')
-          .select('customer_name, balance_amount, status')
-          .gt('balance_amount', 0);
-      final dues = <String, double>{};
-      for (final row in List<Map<String, dynamic>>.from(rows)) {
-        if (row['status']?.toString() == 'cancelled') continue;
-        final name =
-            row['customer_name']?.toString().trim().toLowerCase() ?? '';
-        dues[name] =
-            (dues[name] ?? 0) +
-            ((row['balance_amount'] as num?)?.toDouble() ?? 0);
+      final rows = await Supabase.instance.client.rpc(
+        'customer_balances',
+        params: {'p_names': names},
+      );
+      final dues = <String, Paise>{};
+      for (final row in List<Map<String, dynamic>>.from(rows as List)) {
+        final name = row['customer_name']?.toString().trim().toLowerCase();
+        if (name == null) continue;
+        dues[name] = (dues[name] ?? Paise.zero) + Paise.parse(row['due']);
       }
-      if (mounted) setState(() => _dues = dues);
+      if (mounted) setState(() => _dues = {..._dues, ...dues});
     } catch (_) {
       // The list still works without the amounts.
     }
   }
 
+  Future<void> _addCustomer() async {
+    final saved = await _showCustomerForm(context);
+    if (saved != null) {
+      await rows.refresh();
+      await _loadTotals();
+    }
+  }
+
+  Future<void> _editCustomer(Map<String, dynamic> customer) async {
+    final saved = await _showCustomerForm(context, customer: customer);
+    if (saved != null) await rows.refresh();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final owed = _dues.values.fold<double>(0, (sum, value) => sum + value);
     return Scaffold(
       floatingActionButton: BusinessAccess.readOnly
           ? null
@@ -4044,151 +4094,121 @@ class _CustomersPageState extends State<CustomersPage> {
           children: [
             _PageHeader(
               title: _showingCached ? 'Customers (offline)' : 'Customers',
+              actions: [
+                _SortButton(
+                  options: _sorts,
+                  selected: _sort,
+                  onSelected: (value) {
+                    setState(() => _sort = value);
+                    filtersChanged();
+                  },
+                ),
+              ],
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-              child: _ListSearch(
-                controller: _searchController,
-                hint: BusinessSettings.isGstRegistered.value
-                    ? 'Search name, mobile or GSTIN'
-                    : 'Search name or mobile',
-                onChanged: (_) {},
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: StatTile(
-                      label: 'Customers',
-                      value: '${_customers.length}',
-                      tone: TileTone.navy,
-                    ),
+            Expanded(
+              child: pagedListBody(
+                noun: 'customers',
+                filtered: hasSearch,
+                header: [
+                  _ListSearch(
+                    controller: search,
+                    hint: BusinessSettings.isGstRegistered.value
+                        ? 'Search name, mobile or GSTIN'
+                        : 'Search name or mobile',
+                    onChanged: onSearchChanged,
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: StatTile(
-                      label: 'Owe you',
-                      value: rupees(owed),
-                      tone: TileTone.orange,
-                    ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: StatTile(
+                          label: 'Customers',
+                          value: '$_customerCount',
+                          tone: TileTone.navy,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: StatTile(
+                          label: 'Owe you',
+                          value: rupees(_totals.money('to_collect').inRupees),
+                          tone: TileTone.orange,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                empty: EmptyState(
+                  icon: Icons.people_outline,
+                  message: 'No customers yet. Add your first customer.',
+                  actionLabel: BusinessAccess.readOnly ? null : 'New customer',
+                  onAction: _addCustomer,
+                ),
+                noMatch: const EmptyState(
+                  icon: Icons.people_outline,
+                  message: 'No customers match this search.',
+                ),
+                build: (list) => [
+                  RowGroup(
+                    children: [for (final customer in list) _row(customer)],
                   ),
                 ],
               ),
             ),
-            Expanded(child: _buildBody()),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildBody() {
-    if (_isLoading && _customers.isEmpty) {
-      return ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        children: const [SkeletonRows()],
-      );
-    }
-    if (_errorMessage != null) {
-      return _loadError(_errorMessage!, _loadCustomers);
-    }
-
-    final customers = _visibleCustomers;
-    final hasSearch = _searchController.text.trim().isNotEmpty;
+  Widget _row(Map<String, dynamic> customer) {
     final theme = Theme.of(context);
     final dark = theme.brightness == Brightness.dark;
-    return RefreshIndicator(
-      onRefresh: () async {
-        await Future.wait([_loadCustomers(), _loadDues()]);
-      },
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
+    final name = customer['name'] as String? ?? 'Unnamed customer';
+    final due = _dues[name.trim().toLowerCase()] ?? Paise.zero;
+    final gstin = BusinessSettings.isGstRegistered.value
+        ? (customer['gstin'] as String? ?? '')
+        : '';
+    final contact = [
+      (customer['phone'] as String?) ?? '',
+      if (gstin.isNotEmpty) 'GSTIN $gstin',
+    ].where((part) => part.isNotEmpty).join(' · ');
+    return ListRowTile(
+      leading: InitialTile(name),
+      title: name,
+      subtitle: contact.isEmpty
+          ? (customer['email'] as String? ?? '')
+          : contact,
+      onTap: () => _openPage(context, CustomerHistoryPage(customer: customer)),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          if (customers.isEmpty)
-            EmptyState(
-              icon: Icons.people_outline,
-              message: hasSearch
-                  ? 'No customers match this search.'
-                  : 'No customers yet. Add your first customer.',
-              actionLabel: hasSearch || BusinessAccess.readOnly
-                  ? null
-                  : 'New customer',
-              onAction: _addCustomer,
-            )
-          else
-            RowGroup(
-              children: [
-                for (final customer in customers)
-                  Builder(
-                    builder: (context) {
-                      final name =
-                          customer['name'] as String? ?? 'Unnamed customer';
-                      final due = _dues[name.trim().toLowerCase()] ?? 0;
-                      final gstin = BusinessSettings.isGstRegistered.value
-                          ? (customer['gstin'] as String? ?? '')
-                          : '';
-                      final contact = [
-                        (customer['phone'] as String?) ?? '',
-                        if (gstin.isNotEmpty) 'GSTIN $gstin',
-                      ].where((part) => part.isNotEmpty).join(' · ');
-                      return ListRowTile(
-                        leading: InitialTile(name),
-                        title: name,
-                        subtitle: contact.isEmpty
-                            ? (customer['email'] as String? ?? '')
-                            : contact,
-                        onTap: () => _openPage(
-                          context,
-                          CustomerHistoryPage(customer: customer),
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              due > 0 ? '${rupees(due)} due' : 'All paid',
-                              maxLines: 1,
-                              style: inter(
-                                13.5,
-                                FontWeight.w700,
-                                due > 0
-                                    ? (dark
-                                          ? SimplekColors.orange
-                                          : SimplekColors.orangeText)
-                                    : (dark
-                                          ? SimplekColors.sky
-                                          : SimplekColors.skyText),
-                              ),
-                            ),
-                            if (!BusinessAccess.readOnly)
-                              PopupMenuButton<String>(
-                                tooltip: 'Customer actions',
-                                onSelected: (value) => value == 'edit'
-                                    ? _editCustomer(customer)
-                                    : _removeCatalogEntry(
-                                        context,
-                                        'customers',
-                                        customer,
-                                        _loadCustomers,
-                                      ),
-                                itemBuilder: (_) => const [
-                                  PopupMenuItem(
-                                    value: 'edit',
-                                    child: Text('Edit customer'),
-                                  ),
-                                  PopupMenuItem(
-                                    value: 'delete',
-                                    child: Text('Delete customer'),
-                                  ),
-                                ],
-                              ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
+          Text(
+            due > Paise.zero ? '${rupees(due.inRupees)} due' : 'All paid',
+            maxLines: 1,
+            style: inter(
+              13.5,
+              FontWeight.w700,
+              due > Paise.zero
+                  ? (dark ? SimplekColors.orange : SimplekColors.orangeText)
+                  : (dark ? SimplekColors.sky : SimplekColors.skyText),
+            ),
+          ),
+          if (!BusinessAccess.readOnly)
+            PopupMenuButton<String>(
+              tooltip: 'Customer actions',
+              onSelected: (value) => value == 'edit'
+                  ? _editCustomer(customer)
+                  : _removeCatalogEntry(
+                      context,
+                      'customers',
+                      customer,
+                      rows.refresh,
+                    ),
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'edit', child: Text('Edit customer')),
+                PopupMenuItem(value: 'delete', child: Text('Delete customer')),
               ],
             ),
         ],
@@ -4211,6 +4231,11 @@ class _CustomerHistoryPageState extends State<CustomerHistoryPage> {
   String? _error;
   List<Map<String, dynamic>> _invoices = [];
   List<Map<String, dynamic>> _quotations = [];
+  _Totals _totals = _Totals.empty;
+
+  /// Each list shows this customer's newest documents; the totals above
+  /// them cover all of them (CR-25B B2).
+  static const _shown = 100;
 
   @override
   void initState() {
@@ -4225,24 +4250,28 @@ class _CustomerHistoryPageState extends State<CustomerHistoryPage> {
     });
     try {
       final name = widget.customer['name']?.toString() ?? '';
-      final results = await Future.wait([
+      final results = await Future.wait<Object?>([
         Supabase.instance.client
             .from('invoices')
             .select(
               'invoice_number, invoice_date, status, total_amount, balance_amount',
             )
             .eq('customer_name', name)
-            .order('invoice_date', ascending: false),
+            .order('invoice_date', ascending: false)
+            .limit(_shown),
         Supabase.instance.client
             .from('quotations')
             .select('quotation_number, quotation_date, status, total_amount')
             .eq('customer_name', name)
-            .order('quotation_date', ascending: false),
+            .order('quotation_date', ascending: false)
+            .limit(_shown),
+        _Totals.load(customer: name),
       ]).timeout(const Duration(seconds: 15));
       if (mounted) {
         setState(() {
           _invoices = List<Map<String, dynamic>>.from(results[0] as List);
           _quotations = List<Map<String, dynamic>>.from(results[1] as List);
+          _totals = results[2] as _Totals;
         });
       }
     } catch (error) {
@@ -4260,14 +4289,9 @@ class _CustomerHistoryPageState extends State<CustomerHistoryPage> {
   @override
   Widget build(BuildContext context) {
     final name = widget.customer['name']?.toString() ?? 'Customer';
-    final sales = _invoices.fold<double>(
-      0,
-      (sum, invoice) => sum + _amount(invoice['total_amount']),
-    );
-    final outstanding = _invoices.fold<double>(
-      0,
-      (sum, invoice) => sum + _amount(invoice['balance_amount']),
-    );
+    // Worked out on the server over all of this customer's invoices.
+    final sales = _totals.money('total_sales').inRupees;
+    final outstanding = _totals.money('to_collect').inRupees;
     return Scaffold(
       appBar: AppBar(title: const Text('Customer History')),
       body: _loading
@@ -5716,7 +5740,11 @@ class PaymentsPage extends StatefulWidget {
 class _PaymentsPageState extends State<PaymentsPage> {
   final _formKey = GlobalKey<FormState>();
   final _amountController = TextEditingController();
-  List<Map<String, dynamic>> _invoices = [];
+
+  /// The invoice being paid, and how many invoices still have a balance
+  /// (counted on the server, CR-25B B2).
+  Map<String, dynamic>? _selected;
+  int _unpaidCount = 0;
   String? _invoiceId;
   String _method = 'upi';
   bool _loading = true;
@@ -5748,24 +5776,31 @@ class _PaymentsPageState extends State<PaymentsPage> {
           ),
         );
       }
-      final rows = await Supabase.instance.client
-          .from('invoices')
-          .select(
-            'id, invoice_number, customer_name, invoice_date, balance_amount',
-          )
-          .gt('balance_amount', 0)
-          .order('invoice_date', ascending: false);
+      final client = Supabase.instance.client;
+      final wanted = _invoiceId ?? widget.initialInvoiceId;
+      final results = await Future.wait<Object?>([
+        client
+            .from('invoices')
+            .select('id')
+            .gt('balance_amount', 0)
+            .neq('status', 'cancelled')
+            .count(CountOption.exact),
+        if (wanted != null)
+          client
+              .from('invoices')
+              .select(_PaymentsPageState.invoiceColumns)
+              .eq('id', wanted)
+              .gt('balance_amount', 0)
+              .maybeSingle(),
+      ]);
       if (mounted) {
         setState(() {
-          _invoices = List<Map<String, dynamic>>.from(rows);
-          final initial = widget.initialInvoiceId;
-          if (_invoiceId == null &&
-              initial != null &&
-              _invoices.any(
-                (invoice) => invoice['id']?.toString() == initial,
-              )) {
-            _invoiceId = initial;
-          }
+          _unpaidCount = (results[0] as PostgrestResponse).count;
+          final invoice = results.length > 1 ? results[1] : null;
+          _selected = invoice == null
+              ? null
+              : Map<String, dynamic>.from(invoice as Map);
+          _invoiceId = _selected?['id']?.toString();
         });
         if (syncedPayments > 0) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -5836,12 +5871,10 @@ class _PaymentsPageState extends State<PaymentsPage> {
     ('cheque', 'Cheque', Icons.edit_note),
   ];
 
-  Map<String, dynamic>? get _selectedInvoice {
-    for (final invoice in _invoices) {
-      if (invoice['id']?.toString() == _invoiceId) return invoice;
-    }
-    return null;
-  }
+  static const invoiceColumns =
+      'id, invoice_number, customer_name, invoice_date, balance_amount';
+
+  Map<String, dynamic>? get _selectedInvoice => _selected;
 
   Paise get _balance => Paise.parse(_selectedInvoice?['balance_amount']);
 
@@ -5891,7 +5924,7 @@ class _PaymentsPageState extends State<PaymentsPage> {
                         child: ListView(
                           padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                           children: [
-                            if (_invoices.isEmpty)
+                            if (_unpaidCount == 0 && _selected == null)
                               const EmptyState(
                                 icon: Icons.check_circle_outline,
                                 message:
@@ -5943,7 +5976,7 @@ class _PaymentsPageState extends State<PaymentsPage> {
                                             ),
                                             Text(
                                               invoice == null
-                                                  ? '${_invoices.length} unpaid invoice${_invoices.length == 1 ? '' : 's'}'
+                                                  ? '$_unpaidCount unpaid invoice${_unpaidCount == 1 ? '' : 's'}'
                                                   : '${invoice['customer_name']} · ${screenDate(parseStoredDate(invoice['invoice_date']))}',
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
@@ -6160,7 +6193,7 @@ class _PaymentsPageState extends State<PaymentsPage> {
           ),
         ),
       ),
-      bottomNavigationBar: _invoices.isEmpty
+      bottomNavigationBar: _unpaidCount == 0 && _selected == null
           ? null
           : DecoratedBox(
               decoration: BoxDecoration(
@@ -6195,29 +6228,141 @@ class _PaymentsPageState extends State<PaymentsPage> {
   }
 
   Future<void> _chooseInvoice(BuildContext context) async {
-    final chosen = await showModalBottomSheet<String>(
+    final chosen = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       builder: (sheet) => SizedBox(
-        height: MediaQuery.sizeOf(sheet).height * 0.7,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: Text(
-                'Choose an invoice',
-                style: Theme.of(sheet).textTheme.headlineSmall,
-              ),
-            ),
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                children: [
+        height: MediaQuery.sizeOf(sheet).height * 0.8,
+        child: const _UnpaidInvoicePicker(),
+      ),
+    );
+    if (chosen != null && mounted) {
+      setState(() {
+        _selected = chosen;
+        _invoiceId = chosen['id']?.toString();
+      });
+    }
+  }
+}
+
+/// The invoices with a balance, searched and loaded 25 at a time from the
+/// server, for Record payment.
+class _UnpaidInvoicePicker extends StatefulWidget {
+  const _UnpaidInvoicePicker();
+
+  @override
+  State<_UnpaidInvoicePicker> createState() => _UnpaidInvoicePickerState();
+}
+
+class _UnpaidInvoicePickerState extends State<_UnpaidInvoicePicker> {
+  late final PagedRows _rows = PagedRows(_fetch)..appending = true;
+  final _search = TextEditingController();
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _rows.addListener(_changed);
+    _rows.restart();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _rows
+      ..removeListener(_changed)
+      ..dispose();
+    _search.dispose();
+    super.dispose();
+  }
+
+  void _changed() {
+    if (mounted) setState(() {});
+  }
+
+  Future<PageResult> _fetch(int from, int to) {
+    var query = Supabase.instance.client
+        .from('invoices')
+        .select(_PaymentsPageState.invoiceColumns)
+        .gt('balance_amount', 0)
+        .neq('status', 'cancelled');
+    final term = _searchTerm(_search.text);
+    if (term.isNotEmpty) {
+      query = query.or(_ilikeAny(['invoice_number', 'customer_name'], term));
+    }
+    return _pageOf(
+      query
+          .order('invoice_date', ascending: false)
+          .order('invoice_number', ascending: false),
+      from,
+      to,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final list = _rows.rows;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          child: Text(
+            'Choose an invoice',
+            style: theme.textTheme.headlineSmall,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: _ListSearch(
+            controller: _search,
+            hint: 'Search invoice number or customer',
+            onChanged: (_) {
+              _timer?.cancel();
+              _timer = Timer(const Duration(milliseconds: 350), _rows.restart);
+            },
+          ),
+        ),
+        Expanded(
+          child: NotificationListener<ScrollNotification>(
+            onNotification: (notification) {
+              if (notification.metrics.extentAfter < 400) _rows.loadMore();
+              return false;
+            },
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              children: [
+                if (_rows.error != null && list.isEmpty)
+                  _loadError(
+                    _connectionMessage(
+                      _rows.error!,
+                      fallback: 'Unable to load invoices.',
+                    ),
+                    _rows.refresh,
+                  )
+                else if (_rows.loading && list.isEmpty)
+                  const SkeletonRows()
+                else if (list.isEmpty)
+                  EmptyState(
+                    icon: Icons.search_off,
+                    message: _search.text.trim().isEmpty
+                        ? 'Every invoice is paid. Nothing to record.'
+                        : 'No unpaid invoices match this search.',
+                  )
+                else ...[
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Text(
+                      '${_rows.total} unpaid · '
+                      '${pageOfLabel(_rows.pagesShown, _rows.pageCount)}',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ),
                   RowGroup(
                     children: [
-                      for (final invoice in _invoices)
+                      for (final invoice in list)
                         ListRowTile(
                           leading: InitialTile(
                             invoice['customer_name']?.toString() ?? '',
@@ -6227,29 +6372,35 @@ class _PaymentsPageState extends State<PaymentsPage> {
                               '${invoice['invoice_number']} · ${screenDate(parseStoredDate(invoice['invoice_date']))}',
                           trailingTop: Text(
                             rupees(
-                              (invoice['balance_amount'] as num?)?.toDouble() ??
-                                  0,
+                              Paise.parse(invoice['balance_amount']).inRupees,
                             ),
                             style: inter(
                               14.5,
                               FontWeight.w700,
-                              Theme.of(sheet).colorScheme.onSurface,
+                              theme.colorScheme.onSurface,
                             ),
                           ),
-                          onTap: () => Navigator.of(
-                            sheet,
-                          ).pop(invoice['id']?.toString()),
+                          onTap: () => Navigator.of(context).pop(invoice),
                         ),
                     ],
                   ),
+                  if (_rows.hasMore)
+                    const Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Center(
+                        child: SizedBox.square(
+                          dimension: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                    ),
                 ],
-              ),
+              ],
             ),
-          ],
+          ),
         ),
-      ),
+      ],
     );
-    if (chosen != null && mounted) setState(() => _invoiceId = chosen);
   }
 }
 
@@ -6332,178 +6483,169 @@ class ReportsPage extends StatefulWidget {
 class _ReportsPageState extends State<ReportsPage> {
   bool _loading = true;
   String? _error;
-  List<Map<String, dynamic>> _invoices = [];
-  List<Map<String, dynamic>> _invoiceItems = [];
-  DateTimeRange? _reportPeriod;
+  bool _exporting = false;
+  DatePeriod _period = DatePeriod.all;
+  int _request = 0;
+
+  // Worked out on the server over every counted invoice (CR-25B B2).
+  Map<String, dynamic> _summary = const {};
+  List<Map<String, dynamic>> _customers = const [];
+  List<Map<String, dynamic>> _items = const [];
+  List<Map<String, dynamic>> _issues = const [];
+
+  // The first invoices of each GSTR-1 table and the newest ten; the export
+  // has all of them.
+  List<Map<String, dynamic>> _b2b = const [];
+  List<Map<String, dynamic>> _b2c = const [];
+  List<Map<String, dynamic>> _recent = const [];
+  bool _allCustomers = false;
+  bool _allItems = false;
+
+  static const _preview = 20;
+  static const _shownByDefault = 10;
 
   @override
   void initState() {
     super.initState();
+    final params = UrlState.read();
+    if (params['tab'] == 'reports') _period = DatePeriod.fromUrl(params);
+    invoiceChanges.addListener(_load);
     _load();
   }
 
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      final rows = await Supabase.instance.client
-          .from('invoices')
-          .select(
-            'id, invoice_number, customer_name, customer_gstin, invoice_date, status, place_of_supply, tax_type, subtotal, tax_amount, cgst_amount, sgst_amount, igst_amount, total_amount, paid_amount, balance_amount',
-          )
-          .order('invoice_date', ascending: false)
-          .limit(500);
-      final itemRows = await Supabase.instance.client
-          .from('invoice_items')
-          .select(
-            'invoice_id, item_name, quantity, taxable_amount, tax_amount, total_amount',
-          )
-          .limit(5000);
-      if (mounted) {
-        setState(() {
-          _invoices = List<Map<String, dynamic>>.from(rows);
-          _invoiceItems = List<Map<String, dynamic>>.from(itemRows);
-        });
-      }
-    } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
+  @override
+  void dispose() {
+    invoiceChanges.removeListener(_load);
+    super.dispose();
   }
-
-  double _amount(dynamic value) => value is num
-      ? value.toDouble()
-      : double.tryParse(value?.toString() ?? '') ?? 0;
-  String _money(double amount) => rupees(amount);
 
   /// GST reports and tax columns only for a GST-registered business
   /// (CR-25 change 6).
   bool get _gst => BusinessSettings.isGstRegistered.value;
   String get _exportName => _gst ? 'gstr1' : 'sales';
 
-  DateTime? _invoiceDate(Map<String, dynamic> invoice) =>
-      DateTime.tryParse(invoice['invoice_date']?.toString() ?? '');
+  Map<String, dynamic> get _range => {
+    'p_from': _period.fromDb,
+    'p_to': _period.toDb,
+  };
 
-  bool _isInReportPeriod(Map<String, dynamic> invoice) {
-    final period = _reportPeriod;
-    if (period == null) return true;
-    final date = _invoiceDate(invoice);
-    if (date == null) return false;
-    final day = DateUtils.dateOnly(date);
-    return !day.isBefore(DateUtils.dateOnly(period.start)) &&
-        !day.isAfter(DateUtils.dateOnly(period.end));
+  /// The invoices every report counts: not drafts, not cancelled (deleted
+  /// ones are never returned), within the dates.
+  PostgrestFilterBuilder<PostgrestList> _counted(String columns) {
+    var query = Supabase.instance.client
+        .from('invoices')
+        .select(columns)
+        .neq('status', 'draft')
+        .neq('status', 'cancelled');
+    if (_period.fromDb != null) {
+      query = query
+          .gte('invoice_date', _period.fromDb!)
+          .lte('invoice_date', _period.toDb!);
+    }
+    return query;
   }
 
-  String _shortDate(DateTime date) =>
-      '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
+  static const _listColumns =
+      'id, invoice_number, customer_name, customer_gstin, invoice_date, status, total_amount';
 
-  Future<void> _selectReportPeriod() async {
-    final now = DateTime.now();
-    final selected = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime(now.year - 10),
-      lastDate: DateTime(now.year + 1, 12, 31),
-      initialDateRange: _reportPeriod,
-      helpText: 'Select report period',
-      saveText: 'Apply',
-    );
-    if (selected != null && mounted) {
-      setState(() => _reportPeriod = selected);
+  Future<void> _load() async {
+    final request = ++_request;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final client = Supabase.instance.client;
+      List<Map<String, dynamic>> rows(Object? value) =>
+          List<Map<String, dynamic>>.from(value as List);
+      final results = await Future.wait<Object?>([
+        client.rpc('report_summary', params: _range),
+        client.rpc('report_customers', params: _range),
+        client.rpc('report_items', params: _range),
+        _counted(_listColumns)
+            .order('invoice_date', ascending: false)
+            .order('invoice_number', ascending: false)
+            .limit(10),
+        if (_gst) ...[
+          client.rpc('report_gstr1_issues', params: _range),
+          _counted(_listColumns)
+              .neq('customer_gstin', '')
+              .order('invoice_date', ascending: false)
+              .limit(_preview),
+          _counted(_listColumns)
+              .eq('customer_gstin', '')
+              .order('invoice_date', ascending: false)
+              .limit(_preview),
+        ],
+      ]).timeout(const Duration(seconds: 30));
+      if (!mounted || request != _request) return;
+      setState(() {
+        _summary = Map<String, dynamic>.from(results[0] as Map);
+        _customers = rows(results[1]);
+        _items = rows(results[2]);
+        _recent = rows(results[3]);
+        _issues = _gst ? rows(results[4]) : const [];
+        _b2b = _gst ? rows(results[5]) : const [];
+        _b2c = _gst ? rows(results[6]) : const [];
+      });
+    } catch (error) {
+      if (mounted && request == _request) {
+        setState(() => _error = _connectionMessage(error, fallback: '$error'));
+      }
+    } finally {
+      if (mounted && request == _request) setState(() => _loading = false);
     }
   }
 
-  Map<String, Map<String, double>> _customerSummary(
-    List<Map<String, dynamic>> rows,
-  ) {
-    final result = <String, Map<String, double>>{};
-    for (final invoice in rows) {
-      final name = invoice['customer_name']?.toString().trim();
-      final key = name == null || name.isEmpty ? 'Unnamed customer' : name;
-      final summary = result.putIfAbsent(
-        key,
-        () => {'count': 0, 'sales': 0, 'tax': 0, 'outstanding': 0},
-      );
-      summary['count'] = summary['count']! + 1;
-      summary['sales'] = summary['sales']! + _amount(invoice['total_amount']);
-      summary['tax'] = summary['tax']! + _amount(invoice['tax_amount']);
-      summary['outstanding'] =
-          summary['outstanding']! + _amount(invoice['balance_amount']);
-    }
-    return result;
+  void _setPeriod(DatePeriod period) {
+    setState(() => _period = period);
+    UrlState.replace({'tab': 'reports', ...period.toUrl()});
+    _load();
   }
 
-  Map<String, Map<String, double>> _itemSummary(Set<String> invoiceIds) {
-    final result = <String, Map<String, double>>{};
-    for (final item in _invoiceItems.where(
-      (row) => invoiceIds.contains(row['invoice_id']?.toString()),
-    )) {
-      final name = item['item_name']?.toString().trim();
-      final key = name == null || name.isEmpty ? 'Unnamed item' : name;
-      final summary = result.putIfAbsent(
-        key,
-        () => {'quantity': 0, 'taxable': 0, 'tax': 0, 'sales': 0},
-      );
-      summary['quantity'] = summary['quantity']! + _amount(item['quantity']);
-      summary['taxable'] =
-          summary['taxable']! + _amount(item['taxable_amount']);
-      summary['tax'] = summary['tax']! + _amount(item['tax_amount']);
-      summary['sales'] = summary['sales']! + _amount(item['total_amount']);
-    }
-    return result;
-  }
+  Paise _money(String key) => Paise.parse(_summary[key]);
+  int _count(String key) => (_summary[key] as num?)?.toInt() ?? 0;
+  String _rupees(Object? amount) => rupees(Paise.parse(amount).inRupees);
 
-  List<String> _gstrValidationIssues(Map<String, dynamic> invoice) {
-    final issues = <String>[];
-    final gstin =
-        invoice['customer_gstin']?.toString().trim().toUpperCase() ?? '';
-    final tax = _amount(invoice['tax_amount']);
-    final cgst = _amount(invoice['cgst_amount']);
-    final sgst = _amount(invoice['sgst_amount']);
-    final igst = _amount(invoice['igst_amount']);
-    if ((invoice['invoice_number']?.toString().trim() ?? '').isEmpty) {
-      issues.add('Missing invoice number');
-    }
-    if (_invoiceDate(invoice) == null) issues.add('Invalid invoice date');
-    if (gstin.isNotEmpty &&
-        !RegExp(
-          r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$',
-        ).hasMatch(gstin)) {
-      issues.add('Invalid customer GSTIN');
-    }
-    if (tax > 0 &&
-        (invoice['place_of_supply']?.toString().trim() ?? '').isEmpty) {
-      issues.add('Missing place of supply');
-    }
-    if ((tax - (cgst + sgst + igst)).abs() > 0.02) {
-      issues.add('GST components do not match total tax');
-    }
-    if (igst > 0 && (cgst > 0 || sgst > 0)) {
-      issues.add('Invoice mixes IGST and CGST/SGST');
-    }
-    if ((cgst - sgst).abs() > 0.02 && igst == 0) {
-      issues.add('CGST and SGST are not equal');
-    }
-    return issues;
-  }
+  // --- Exports: every counted invoice in the dates -----------------------
 
-  List<Map<String, dynamic>> get _exportInvoices => _invoices
-      .where(
-        (invoice) =>
-            invoice['status']?.toString() != 'cancelled' &&
-            invoice['status']?.toString() != 'draft' &&
-            _isInReportPeriod(invoice),
-      )
-      .toList();
+  static const _exportColumns =
+      'id, invoice_number, customer_name, customer_gstin, invoice_date, status, place_of_supply, tax_type, subtotal, tax_amount, cgst_amount, sgst_amount, igst_amount, total_amount, paid_amount, balance_amount';
+
+  /// All counted invoices in the dates, 1,000 at a time, oldest first.
+  Future<List<Map<String, dynamic>>> _exportInvoices() async {
+    const chunk = 1000;
+    final all = <Map<String, dynamic>>[];
+    for (var from = 0; ; from += chunk) {
+      final page = await _counted(_exportColumns)
+          .order('invoice_date', ascending: true)
+          .order('invoice_number', ascending: true)
+          .range(from, from + chunk - 1);
+      all.addAll(List<Map<String, dynamic>>.from(page));
+      if (page.length < chunk) return all;
+    }
+  }
 
   String get _periodSlug {
-    final period = _reportPeriod;
-    if (period == null) return 'all_dates';
+    if (_period.from == null) return 'all_dates';
     String compact(DateTime date) =>
         '${date.year}${date.month.toString().padLeft(2, '0')}${date.day.toString().padLeft(2, '0')}';
-    return '${compact(period.start)}_${compact(period.end)}';
+    return '${compact(_period.from!)}_${compact(_period.to!)}';
+  }
+
+  /// The lines printed above every export: what it is, the filter and when
+  /// it was made.
+  List<String> _exportTitle(int count) {
+    final now = DateTime.now();
+    final time =
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+    return [
+      _gst ? 'Simplek GSTR-1 report' : 'Simplek sales report',
+      'Business: ${BusinessSettings.profile.value['name'] ?? ''}',
+      'Dates: ${_period.label}',
+      'Includes: all $count invoices in these dates, except drafts and cancelled invoices',
+      'Made on: ${screenDate(now)}, $time',
+    ];
   }
 
   String _csvCell(dynamic value) {
@@ -6511,22 +6653,25 @@ class _ReportsPageState extends State<ReportsPage> {
     return '"${text.replaceAll('"', '""')}"';
   }
 
-  List<dynamic> _exportRow(Map<String, dynamic> invoice) => [
-    invoice['invoice_number'],
-    invoice['invoice_date'],
-    invoice['customer_name'],
-    if (_gst) invoice['customer_gstin'],
-    if (_gst) invoice['place_of_supply'],
-    invoice['status'],
-    if (_gst) _amount(invoice['subtotal']),
-    if (_gst) _amount(invoice['cgst_amount']),
-    if (_gst) _amount(invoice['sgst_amount']),
-    if (_gst) _amount(invoice['igst_amount']),
-    if (_gst) _amount(invoice['tax_amount']),
-    _amount(invoice['total_amount']),
-    _amount(invoice['paid_amount']),
-    _amount(invoice['balance_amount']),
-  ];
+  List<dynamic> _exportRow(Map<String, dynamic> invoice) {
+    double money(String key) => Paise.parse(invoice[key]).inRupees;
+    return [
+      invoice['invoice_number'],
+      invoice['invoice_date'],
+      invoice['customer_name'],
+      if (_gst) invoice['customer_gstin'],
+      if (_gst) invoice['place_of_supply'],
+      invoice['status'],
+      if (_gst) money('subtotal'),
+      if (_gst) money('cgst_amount'),
+      if (_gst) money('sgst_amount'),
+      if (_gst) money('igst_amount'),
+      if (_gst) money('tax_amount'),
+      money('total_amount'),
+      money('paid_amount'),
+      money('balance_amount'),
+    ];
+  }
 
   List<String> get _exportHeaders => [
     'Invoice Number',
@@ -6560,36 +6705,39 @@ class _ReportsPageState extends State<ReportsPage> {
     await SharePlus.instance.share(
       ShareParams(
         subject: 'Simplek report export',
-        text: 'Simplek report for the selected period.',
+        text: 'Simplek report: ${_period.label}.',
         files: [file],
       ),
     );
   }
 
-  Future<void> _exportCsv() async {
+  Future<void> _exportCsv(List<Map<String, dynamic>> invoices) async {
     final lines = <String>[
+      for (final line in _exportTitle(invoices.length)) _csvCell(line),
+      '',
       _exportHeaders.map(_csvCell).join(','),
-      ..._exportInvoices.map(
-        (invoice) => _exportRow(invoice).map(_csvCell).join(','),
-      ),
+      ...invoices.map((invoice) => _exportRow(invoice).map(_csvCell).join(',')),
     ];
     await _shareExport(
-      utf8.encode('\uFEFF${lines.join('\r\n')}'),
+      utf8.encode('﻿${lines.join('\r\n')}'),
       filename: 'simplek_${_exportName}_$_periodSlug.csv',
       mimeType: 'text/csv',
     );
   }
 
-  Future<void> _exportExcel() async {
+  Future<void> _exportExcel(List<Map<String, dynamic>> invoices) async {
     final workbook = xlsx.Excel.createExcel();
     final sheet = workbook[_gst ? 'GSTR-1' : 'Sales'];
+    for (final line in _exportTitle(invoices.length)) {
+      sheet.appendRow([xlsx.TextCellValue(line)]);
+    }
+    sheet.appendRow([xlsx.TextCellValue('')]);
     sheet.appendRow(
       _exportHeaders.map((value) => xlsx.TextCellValue(value)).toList(),
     );
-    for (final invoice in _exportInvoices) {
-      final row = _exportRow(invoice);
+    for (final invoice in invoices) {
       sheet.appendRow(
-        row
+        _exportRow(invoice)
             .map<xlsx.CellValue>(
               (value) => value is num
                   ? xlsx.DoubleCellValue(value.toDouble())
@@ -6597,6 +6745,10 @@ class _ReportsPageState extends State<ReportsPage> {
             )
             .toList(),
       );
+    }
+    // createExcel starts with an empty "Sheet1"; keep only the report.
+    if (workbook.sheets.length > 1 && workbook.sheets.containsKey('Sheet1')) {
+      workbook.delete('Sheet1');
     }
     final bytes = workbook.encode();
     if (bytes == null) throw StateError('Unable to create Excel workbook.');
@@ -6615,20 +6767,25 @@ class _ReportsPageState extends State<ReportsPage> {
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&apos;');
 
-  Future<void> _exportTallyXml() async {
+  Future<void> _exportTallyXml(List<Map<String, dynamic>> invoices) async {
     final company = BusinessSettings.profile.value['name'] ?? 'Simplek';
-    final vouchers = _exportInvoices.map((invoice) {
+    final vouchers = invoices.map((invoice) {
       return '''<TALLYMESSAGE xmlns:UDF="TallyUDF">
 <VOUCHER VCHTYPE="Sales" ACTION="Create">
 <DATE>${_xml(invoice['invoice_date']?.toString().replaceAll('-', ''))}</DATE>
 <VOUCHERTYPENAME>Sales</VOUCHERTYPENAME>
 <VOUCHERNUMBER>${_xml(invoice['invoice_number'])}</VOUCHERNUMBER>
 <PARTYLEDGERNAME>${_xml(invoice['customer_name'])}</PARTYLEDGERNAME>
-${_gst ? '<PARTYGSTIN>${_xml(invoice['customer_gstin'])}</PARTYGSTIN>\n<PLACEOFSUPPLY>${_xml(invoice['place_of_supply'])}</PLACEOFSUPPLY>\n' : ''}<AMOUNT>${_amount(invoice['total_amount']).toStringAsFixed(2)}</AMOUNT>
+${_gst ? '<PARTYGSTIN>${_xml(invoice['customer_gstin'])}</PARTYGSTIN>\n<PLACEOFSUPPLY>${_xml(invoice['place_of_supply'])}</PLACEOFSUPPLY>\n' : ''}<AMOUNT>${Paise.parse(invoice['total_amount']).inRupees.toStringAsFixed(2)}</AMOUNT>
 </VOUCHER></TALLYMESSAGE>''';
     }).join();
+    // The filter and date as an XML comment ("--" is not allowed inside).
+    final title = _exportTitle(
+      invoices.length,
+    ).map((line) => _xml(line).replaceAll('--', '–')).join('\n     ');
     final document =
         '''<?xml version="1.0" encoding="UTF-8"?>
+<!-- $title -->
 <ENVELOPE><HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER>
 <BODY><IMPORTDATA><REQUESTDESC><REPORTNAME>Vouchers</REPORTNAME>
 <STATICVARIABLES><SVCURRENTCOMPANY>${_xml(company)}</SVCURRENTCOMPANY></STATICVARIABLES>
@@ -6640,26 +6797,23 @@ ${_gst ? '<PARTYGSTIN>${_xml(invoice['customer_gstin'])}</PARTYGSTIN>\n<PLACEOFS
     );
   }
 
-  Future<void> _exportPdf() async {
+  Future<void> _exportPdf(List<Map<String, dynamic>> invoices) async {
+    final title = _exportTitle(invoices.length);
     final document = pw.Document();
     document.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4.landscape,
         build: (_) => [
           pw.Text(
-            _gst ? 'Simplek GSTR-1 Report' : 'Simplek Sales Report',
+            title.first,
             style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold),
           ),
           pw.SizedBox(height: 6),
-          pw.Text(
-            _reportPeriod == null
-                ? 'All invoice dates'
-                : '${_shortDate(_reportPeriod!.start)} to ${_shortDate(_reportPeriod!.end)}',
-          ),
+          for (final line in title.skip(1)) pw.Text(line),
           pw.SizedBox(height: 12),
           pw.TableHelper.fromTextArray(
             headers: _exportHeaders.take(_exportHeaders.length - 2).toList(),
-            data: _exportInvoices
+            data: invoices
                 .map(
                   (invoice) => _exportRow(
                     invoice,
@@ -6683,22 +6837,28 @@ ${_gst ? '<PARTYGSTIN>${_xml(invoice['customer_gstin'])}</PARTYGSTIN>\n<PLACEOFS
   }
 
   Future<void> _export(String format) async {
-    if (_exportInvoices.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No non-draft invoices to export.')),
-      );
-      return;
-    }
+    if (_exporting) return;
+    setState(() => _exporting = true);
     try {
+      final invoices = await _exportInvoices();
+      if (!mounted) return;
+      if (invoices.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No invoices to export in these dates.'),
+          ),
+        );
+        return;
+      }
       switch (format) {
         case 'csv':
-          await _exportCsv();
+          await _exportCsv(invoices);
         case 'xlsx':
-          await _exportExcel();
+          await _exportExcel(invoices);
         case 'pdf':
-          await _exportPdf();
+          await _exportPdf(invoices);
         case 'xml':
-          await _exportTallyXml();
+          await _exportTallyXml(invoices);
       }
     } catch (error) {
       if (mounted) {
@@ -6706,88 +6866,16 @@ ${_gst ? '<PARTYGSTIN>${_xml(invoice['customer_gstin'])}</PARTYGSTIN>\n<PLACEOFS
           SnackBar(content: Text('Unable to export report: $error')),
         );
       }
+    } finally {
+      if (mounted) setState(() => _exporting = false);
     }
   }
 
+  // --- Screen -------------------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
-    final active = _invoices
-        .where(
-          (invoice) =>
-              invoice['status']?.toString() != 'cancelled' &&
-              _isInReportPeriod(invoice),
-        )
-        .toList();
-    final sales = active.fold<double>(
-      0,
-      (sum, invoice) => sum + _amount(invoice['total_amount']),
-    );
-    final collected = active.fold<double>(
-      0,
-      (sum, invoice) => sum + _amount(invoice['paid_amount']),
-    );
-    final outstanding = active.fold<double>(
-      0,
-      (sum, invoice) => sum + _amount(invoice['balance_amount']),
-    );
-    final paid = active
-        .where((invoice) => invoice['status']?.toString() == 'paid')
-        .length;
-    final pending = active
-        .where(
-          (invoice) => [
-            'draft',
-            'sent',
-            'partial',
-            'overdue',
-          ].contains(invoice['status']?.toString()),
-        )
-        .length;
-    final customers = _customerSummary(active).entries.toList()
-      ..sort((a, b) => b.value['sales']!.compareTo(a.value['sales']!));
-    final invoiceIds = active.map((row) => row['id']?.toString() ?? '').toSet();
-    final items = _itemSummary(invoiceIds).entries.toList()
-      ..sort((a, b) => b.value['sales']!.compareTo(a.value['sales']!));
-    final filingInvoices = active
-        .where((invoice) => invoice['status']?.toString() != 'draft')
-        .toList();
-    final b2bInvoices = filingInvoices
-        .where(
-          (invoice) =>
-              (invoice['customer_gstin']?.toString().trim() ?? '').isNotEmpty,
-        )
-        .toList();
-    final b2cInvoices = filingInvoices
-        .where(
-          (invoice) =>
-              (invoice['customer_gstin']?.toString().trim() ?? '').isEmpty,
-        )
-        .toList();
-    final invalidInvoices = filingInvoices
-        .map(
-          (invoice) =>
-              (invoice: invoice, issues: _gstrValidationIssues(invoice)),
-        )
-        .where((entry) => entry.issues.isNotEmpty)
-        .toList();
-    final filingTaxable = filingInvoices.fold<double>(
-      0,
-      (sum, row) => sum + _amount(row['subtotal']),
-    );
-    final filingCgst = filingInvoices.fold<double>(
-      0,
-      (sum, row) => sum + _amount(row['cgst_amount']),
-    );
-    final filingSgst = filingInvoices.fold<double>(
-      0,
-      (sum, row) => sum + _amount(row['sgst_amount']),
-    );
-    final filingIgst = filingInvoices.fold<double>(
-      0,
-      (sum, row) => sum + _amount(row['igst_amount']),
-    );
     final theme = Theme.of(context);
-    final dark = theme.brightness == Brightness.dark;
     Widget exportButton(String format, String label, {bool strong = false}) {
       final child = Row(
         mainAxisSize: MainAxisSize.min,
@@ -6797,13 +6885,16 @@ ${_gst ? '<PARTYGSTIN>${_xml(invoice['customer_gstin'])}</PARTYGSTIN>\n<PLACEOFS
           Flexible(child: Text(label, maxLines: 1)),
         ],
       );
+      final onPressed = _exporting ? null : () => _export(format);
       return Expanded(
         child: strong
-            ? ElevatedButton(onPressed: () => _export(format), child: child)
-            : OutlinedButton(onPressed: () => _export(format), child: child),
+            ? ElevatedButton(onPressed: onPressed, child: child)
+            : OutlinedButton(onPressed: onPressed, child: child),
       );
     }
 
+    final b2bCount = _count('b2b_count');
+    final b2cCount = _count('b2c_count');
     return Scaffold(
       body: SafeArea(
         child: Column(
@@ -6814,6 +6905,7 @@ ${_gst ? '<PARTYGSTIN>${_xml(invoice['customer_gstin'])}</PARTYGSTIN>\n<PLACEOFS
               actions: [
                 PopupMenuButton<String>(
                   tooltip: 'Export report',
+                  enabled: !_exporting,
                   onSelected: _export,
                   itemBuilder: (_) => const [
                     PopupMenuItem(value: 'pdf', child: Text('Export PDF')),
@@ -6834,502 +6926,52 @@ ${_gst ? '<PARTYGSTIN>${_xml(invoice['customer_gstin'])}</PARTYGSTIN>\n<PLACEOFS
                         color: theme.colorScheme.outlineVariant,
                       ),
                     ),
-                    child: const Icon(Icons.download_outlined),
+                    child: _exporting
+                        ? const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.download_outlined),
                   ),
                 ),
               ],
             ),
             Expanded(
-              child: _loading && _invoices.isEmpty
-                  ? ListView(
-                      padding: const EdgeInsets.all(16),
-                      children: const [SkeletonRows(count: 4)],
-                    )
-                  : _error != null
-                  ? _loadError('Unable to load reports:\n$_error', _load)
-                  : RefreshIndicator(
-                      onRefresh: _load,
-                      child: ListView(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+              child: RefreshIndicator(
+                onRefresh: _load,
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+                  children: [
+                    _PeriodButton(period: _period, onChanged: _setPeriod),
+                    const SizedBox(height: 12),
+                    if (_error != null)
+                      _loadError('Unable to load reports:\n$_error', _load)
+                    else if (_loading && _summary.isEmpty)
+                      const SkeletonRows(count: 4)
+                    else
+                      ..._content(context, b2bCount, b2cCount),
+                    if (_error == null) ...[
+                      const SizedBox(height: 12),
+                      Row(
                         children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Pressable(
-                                  onTap: _selectReportPeriod,
-                                  color: theme.colorScheme.surface,
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: Container(
-                                    height: 48,
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 14,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
-                                        color: dark
-                                            ? SimplekColors.darkLine
-                                            : SimplekColors.skyLine,
-                                      ),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        Icon(
-                                          Icons.calendar_month_outlined,
-                                          color: dark
-                                              ? SimplekColors.sky
-                                              : SimplekColors.skyText,
-                                        ),
-                                        const SizedBox(width: 10),
-                                        Expanded(
-                                          child: Text(
-                                            _reportPeriod == null
-                                                ? 'All invoice dates'
-                                                : '${screenDate(_reportPeriod!.start)} – ${screenDate(_reportPeriod!.end)}',
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: inter(
-                                              15,
-                                              FontWeight.w600,
-                                              theme.colorScheme.onSurface,
-                                            ),
-                                          ),
-                                        ),
-                                        const Icon(Icons.expand_more),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              if (_reportPeriod != null) ...[
-                                const SizedBox(width: 8),
-                                SquareIconButton(
-                                  icon: Icons.close,
-                                  tooltip: 'Show all dates',
-                                  onPressed: () =>
-                                      setState(() => _reportPeriod = null),
-                                ),
-                              ],
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: StatTile(
-                                  label: 'Sales',
-                                  value: _money(sales),
-                                  filled: true,
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: StatTile(
-                                  label: 'Collected',
-                                  value: _money(collected),
-                                  tone: TileTone.sky,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: StatTile(
-                                  label: 'Outstanding',
-                                  value: _money(outstanding),
-                                  tone: TileTone.orange,
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: StatTile(
-                                  label: 'Invoices',
-                                  value: '${active.length}',
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          _WeeklySalesChart(invoices: active),
-                          if (_gst) ...[
-                            const SizedBox(height: 12),
-                            SectionCard(
-                              padding: const EdgeInsets.all(14),
-                              child: Row(
-                                children: [
-                                  IconTile(
-                                    invalidInvoices.isEmpty
-                                        ? Icons.check
-                                        : Icons.warning_amber_rounded,
-                                    tone: invalidInvoices.isEmpty
-                                        ? TileTone.sky
-                                        : TileTone.orange,
-                                    size: 42,
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          invalidInvoices.isEmpty
-                                              ? 'GSTR-1 is ready'
-                                              : 'GSTR-1 needs attention',
-                                          style: theme.textTheme.titleMedium,
-                                        ),
-                                        Text(
-                                          'B2B ${b2bInvoices.length} invoices · B2C ${b2cInvoices.length} invoices · '
-                                          '${invalidInvoices.isEmpty ? 'no errors' : '${invalidInvoices.length} to fix'}',
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: theme.textTheme.bodySmall,
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              exportButton('pdf', 'PDF'),
-                              const SizedBox(width: 8),
-                              exportButton('xlsx', 'Excel'),
-                              const SizedBox(width: 8),
-                              exportButton('xml', 'Tally', strong: true),
-                            ],
-                          ),
-                          const SizedBox(height: 24),
-                          Text(
-                            'Payment status',
-                            style: theme.textTheme.titleLarge,
-                          ),
-                          const SizedBox(height: 12),
-                          Card(
-                            child: Padding(
-                              padding: const EdgeInsets.all(16),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: _statusMetric(
-                                      'Paid',
-                                      paid,
-                                      Colors.green,
-                                    ),
-                                  ),
-                                  Container(
-                                    height: 42,
-                                    width: 1,
-                                    color: Colors.grey.shade300,
-                                  ),
-                                  Expanded(
-                                    child: _statusMetric(
-                                      'Pending',
-                                      pending,
-                                      Colors.orange,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          if (_gst) ...[
-                            const SizedBox(height: 24),
-                            Text(
-                              'GSTR-1 filing tables',
-                              style: Theme.of(context).textTheme.titleLarge,
-                            ),
-                            const SizedBox(height: 8),
-                            const SizedBox(height: 12),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: _metric(
-                                    'B2B invoices',
-                                    b2bInvoices.length.toString(),
-                                    Icons.business_outlined,
-                                    Colors.indigo,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: _metric(
-                                    'B2C invoices',
-                                    b2cInvoices.length.toString(),
-                                    Icons.person_outline,
-                                    Colors.teal,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            Card(
-                              color: invalidInvoices.isEmpty
-                                  ? Colors.green.shade50
-                                  : Colors.orange.shade50,
-                              child: ListTile(
-                                leading: Icon(
-                                  invalidInvoices.isEmpty
-                                      ? Icons.verified_outlined
-                                      : Icons.warning_amber_outlined,
-                                  color: invalidInvoices.isEmpty
-                                      ? Colors.green.shade700
-                                      : Colors.orange.shade800,
-                                ),
-                                title: Text(
-                                  invalidInvoices.isEmpty
-                                      ? 'GSTR-1 validation passed'
-                                      : '${invalidInvoices.length} invoice(s) need attention',
-                                ),
-                                subtitle: Text(
-                                  filingInvoices.isEmpty
-                                      ? 'No non-draft invoices in this period.'
-                                      : 'Draft invoices are excluded from filing tables.',
-                                ),
-                              ),
-                            ),
-                            if (invalidInvoices.isNotEmpty) ...[
-                              const SizedBox(height: 8),
-                              ...invalidInvoices.map(
-                                (entry) => Card(
-                                  child: ListTile(
-                                    leading: const Icon(Icons.error_outline),
-                                    title: Text(
-                                      entry.invoice['invoice_number']
-                                              ?.toString() ??
-                                          'Invoice',
-                                    ),
-                                    subtitle: Text(entry.issues.join(' • ')),
-                                  ),
-                                ),
-                              ),
-                            ],
-                            Card(
-                              child: ExpansionTile(
-                                title: Text(
-                                  'B2B supplies (${b2bInvoices.length})',
-                                ),
-                                subtitle: const Text(
-                                  'Registered customers with GSTIN',
-                                ),
-                                children: b2bInvoices.isEmpty
-                                    ? const [
-                                        ListTile(
-                                          title: Text(
-                                            'No B2B invoices in this period.',
-                                          ),
-                                        ),
-                                      ]
-                                    : b2bInvoices
-                                          .map(
-                                            (invoice) => ListTile(
-                                              title: Text(
-                                                invoice['invoice_number']
-                                                        ?.toString() ??
-                                                    'Invoice',
-                                              ),
-                                              subtitle: Text(
-                                                '${invoice['customer_gstin']} • ${invoice['customer_name']}',
-                                              ),
-                                              trailing: Text(
-                                                _money(
-                                                  _amount(
-                                                    invoice['total_amount'],
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          )
-                                          .toList(),
-                              ),
-                            ),
-                            Card(
-                              child: ExpansionTile(
-                                title: Text(
-                                  'B2C supplies (${b2cInvoices.length})',
-                                ),
-                                subtitle: const Text('Consumers without GSTIN'),
-                                children: b2cInvoices.isEmpty
-                                    ? const [
-                                        ListTile(
-                                          title: Text(
-                                            'No B2C invoices in this period.',
-                                          ),
-                                        ),
-                                      ]
-                                    : b2cInvoices
-                                          .map(
-                                            (invoice) => ListTile(
-                                              title: Text(
-                                                invoice['invoice_number']
-                                                        ?.toString() ??
-                                                    'Invoice',
-                                              ),
-                                              subtitle: Text(
-                                                invoice['customer_name']
-                                                        ?.toString() ??
-                                                    'Customer',
-                                              ),
-                                              trailing: Text(
-                                                _money(
-                                                  _amount(
-                                                    invoice['total_amount'],
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          )
-                                          .toList(),
-                              ),
-                            ),
-                          ],
-                          const SizedBox(height: 24),
-                          Text(
-                            'Recent invoices',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                          const SizedBox(height: 8),
-                          if (active.isEmpty)
-                            const Card(
-                              child: Padding(
-                                padding: EdgeInsets.all(20),
-                                child: Text(
-                                  'No invoice data is available yet.',
-                                ),
-                              ),
-                            )
-                          else
-                            Card(
-                              child: Column(
-                                children: active
-                                    .take(10)
-                                    .map(
-                                      (invoice) => ListTile(
-                                        title: Text(
-                                          invoice['invoice_number']
-                                                  ?.toString() ??
-                                              'Invoice',
-                                        ),
-                                        subtitle: Text(
-                                          '${invoice['customer_name'] ?? ''} • ${(invoice['status'] ?? 'draft').toString().toUpperCase()}',
-                                        ),
-                                        trailing: Text(
-                                          _money(
-                                            _amount(invoice['total_amount']),
-                                          ),
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                    )
-                                    .toList(),
-                              ),
-                            ),
-                          if (_gst) ...[
-                            const SizedBox(height: 24),
-                            Text(
-                              'GSTR-1 summary',
-                              style: Theme.of(context).textTheme.titleLarge,
-                            ),
-                            const SizedBox(height: 8),
-                            Card(
-                              child: Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: Column(
-                                  children: [
-                                    _reportLine('Taxable value', filingTaxable),
-                                    _reportLine('CGST', filingCgst),
-                                    _reportLine('SGST', filingSgst),
-                                    _reportLine('IGST', filingIgst),
-                                    const Divider(),
-                                    _reportLine(
-                                      'Total GST',
-                                      filingCgst + filingSgst + filingIgst,
-                                      bold: true,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                          const SizedBox(height: 24),
-                          Text(
-                            'Customer-wise report',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                          const SizedBox(height: 8),
-                          if (customers.isEmpty)
-                            const Card(
-                              child: Padding(
-                                padding: EdgeInsets.all(16),
-                                child: Text('No customer sales yet.'),
-                              ),
-                            ),
-                          ...customers.map(
-                            (entry) => Card(
-                              child: ListTile(
-                                title: Text(entry.key),
-                                subtitle: Text(
-                                  [
-                                    '${entry.value['count']!.toInt()} invoices',
-                                    if (_gst)
-                                      'Tax ${_money(entry.value['tax']!)}',
-                                    'Due ${_money(entry.value['outstanding']!)}',
-                                  ].join(' • '),
-                                ),
-                                trailing: Text(
-                                  _money(entry.value['sales']!),
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 24),
-                          Text(
-                            'Item-wise report',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                          const SizedBox(height: 8),
-                          if (items.isEmpty)
-                            const Card(
-                              child: Padding(
-                                padding: EdgeInsets.all(16),
-                                child: Text('No item sales yet.'),
-                              ),
-                            ),
-                          ...items.map(
-                            (entry) => Card(
-                              child: ListTile(
-                                title: Text(entry.key),
-                                subtitle: Text(
-                                  [
-                                    'Qty ${plainQuantity(entry.value['quantity']!)}',
-                                    if (_gst)
-                                      'Taxable ${_money(entry.value['taxable']!)}',
-                                    if (_gst)
-                                      'Tax ${_money(entry.value['tax']!)}',
-                                  ].join(' • '),
-                                ),
-                                trailing: Text(
-                                  _money(entry.value['sales']!),
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
+                          exportButton('pdf', 'PDF'),
+                          const SizedBox(width: 8),
+                          exportButton('xlsx', 'Excel'),
+                          const SizedBox(width: 8),
+                          exportButton('xml', 'Tally', strong: true),
                         ],
                       ),
-                    ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Exports include every invoice in these dates, with '
+                        'the dates and the day they were made at the top.',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ),
           ],
         ),
@@ -7337,8 +6979,287 @@ ${_gst ? '<PARTYGSTIN>${_xml(invoice['customer_gstin'])}</PARTYGSTIN>\n<PLACEOFS
     );
   }
 
-  Widget _metric(String label, String value, IconData icon, Color color) =>
-      StatTile(label: label, value: value, tone: TileTone.sky);
+  List<Widget> _content(BuildContext context, int b2bCount, int b2cCount) {
+    final theme = Theme.of(context);
+    final issues = _issues.length;
+    final customers = _allCustomers
+        ? _customers
+        : _customers.take(_shownByDefault).toList();
+    final items = _allItems ? _items : _items.take(_shownByDefault).toList();
+    Widget heading(String text) => Padding(
+      padding: const EdgeInsets.only(top: 24, bottom: 8),
+      child: Text(text, style: theme.textTheme.titleLarge),
+    );
+    Widget more(int shown, int total, VoidCallback onTap) => shown < total
+        ? Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(onPressed: onTap, child: Text('Show all $total')),
+          )
+        : const SizedBox.shrink();
+    Widget invoiceTile(Map<String, dynamic> invoice, {bool gstin = false}) =>
+        ListTile(
+          title: Text(invoice['invoice_number']?.toString() ?? 'Invoice'),
+          subtitle: Text(
+            [
+              if (gstin) invoice['customer_gstin']?.toString() ?? '',
+              invoice['customer_name']?.toString() ?? '',
+              screenDate(parseStoredDate(invoice['invoice_date'])),
+            ].where((part) => part.isNotEmpty).join(' • '),
+          ),
+          trailing: Text(_rupees(invoice['total_amount'])),
+        );
+    Widget shownOf(int shown, int total) => total > shown
+        ? ListTile(
+            dense: true,
+            title: Text(
+              'Showing the newest $shown of $total. The export has all of them.',
+              style: theme.textTheme.bodySmall,
+            ),
+          )
+        : const SizedBox.shrink();
+
+    return [
+      Row(
+        children: [
+          Expanded(
+            child: StatTile(
+              label: 'Sales',
+              value: rupees(_money('sales').inRupees),
+              filled: true,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: StatTile(
+              label: 'Collected',
+              value: rupees(_money('collected').inRupees),
+              tone: TileTone.sky,
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 10),
+      Row(
+        children: [
+          Expanded(
+            child: StatTile(
+              label: 'Outstanding',
+              value: rupees(_money('outstanding').inRupees),
+              tone: TileTone.orange,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: StatTile(
+              label: 'Invoices',
+              value: '${_count('invoice_count')}',
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 12),
+      _WeeklySalesChart(
+        weeks: List<Map<String, dynamic>>.from(
+          (_summary['weeks'] as List?) ?? const [],
+        ),
+      ),
+      if (_gst) ...[
+        const SizedBox(height: 12),
+        SectionCard(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              IconTile(
+                issues == 0 ? Icons.check : Icons.warning_amber_rounded,
+                tone: issues == 0 ? TileTone.sky : TileTone.orange,
+                size: 42,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      issues == 0
+                          ? 'GSTR-1 is ready'
+                          : 'GSTR-1 needs attention',
+                      style: theme.textTheme.titleMedium,
+                    ),
+                    Text(
+                      'B2B $b2bCount invoices · B2C $b2cCount invoices · '
+                      '${issues == 0 ? 'no errors' : '$issues to fix'}',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+      heading('Payment status'),
+      SectionCard(
+        child: Row(
+          children: [
+            Expanded(
+              child: _statusMetric(
+                'Paid',
+                _count('paid_count'),
+                SimplekColors.skyText,
+              ),
+            ),
+            Container(
+              height: 42,
+              width: 1,
+              color: theme.colorScheme.outlineVariant,
+            ),
+            Expanded(
+              child: _statusMetric(
+                'Pending',
+                _count('pending_count'),
+                SimplekColors.orangeText,
+              ),
+            ),
+          ],
+        ),
+      ),
+      if (_gst) ...[
+        heading('GSTR-1 filing tables'),
+        if (issues > 0) ...[
+          for (final entry in _issues)
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.error_outline),
+                title: Text(entry['invoice_number']?.toString() ?? 'Invoice'),
+                subtitle: Text(
+                  List<String>.from(
+                    (entry['issues'] as List?) ?? const [],
+                  ).join(' • '),
+                ),
+              ),
+            ),
+        ],
+        Card(
+          child: ExpansionTile(
+            title: Text('B2B supplies ($b2bCount)'),
+            subtitle: Text(
+              'Registered customers with GSTIN · ${_rupees(_summary['b2b_total'])}',
+            ),
+            children: _b2b.isEmpty
+                ? const [
+                    ListTile(title: Text('No B2B invoices in these dates.')),
+                  ]
+                : [
+                    for (final invoice in _b2b)
+                      invoiceTile(invoice, gstin: true),
+                    shownOf(_b2b.length, b2bCount),
+                  ],
+          ),
+        ),
+        Card(
+          child: ExpansionTile(
+            title: Text('B2C supplies ($b2cCount)'),
+            subtitle: Text(
+              'Consumers without GSTIN · ${_rupees(_summary['b2c_total'])}',
+            ),
+            children: _b2c.isEmpty
+                ? const [
+                    ListTile(title: Text('No B2C invoices in these dates.')),
+                  ]
+                : [
+                    for (final invoice in _b2c) invoiceTile(invoice),
+                    shownOf(_b2c.length, b2cCount),
+                  ],
+          ),
+        ),
+      ],
+      heading('Recent invoices'),
+      if (_recent.isEmpty)
+        const SectionCard(child: Text('No invoices in these dates yet.'))
+      else
+        Card(
+          child: Column(
+            children: [for (final invoice in _recent) invoiceTile(invoice)],
+          ),
+        ),
+      if (_gst) ...[
+        heading('GSTR-1 summary'),
+        SectionCard(
+          child: Column(
+            children: [
+              _reportLine('Taxable value', _money('taxable')),
+              _reportLine('CGST', _money('cgst')),
+              _reportLine('SGST', _money('sgst')),
+              _reportLine('IGST', _money('igst')),
+              const Divider(),
+              _reportLine(
+                'Total GST',
+                _money('cgst') + _money('sgst') + _money('igst'),
+                bold: true,
+              ),
+            ],
+          ),
+        ),
+      ],
+      heading('Customer-wise report'),
+      if (_customers.isEmpty)
+        const SectionCard(child: Text('No customer sales in these dates.'))
+      else ...[
+        for (final row in customers)
+          Card(
+            child: ListTile(
+              title: Text(row['customer']?.toString() ?? ''),
+              subtitle: Text(
+                [
+                  '${row['invoice_count']} invoices',
+                  if (_gst) 'Tax ${_rupees(row['tax'])}',
+                  'Due ${_rupees(row['outstanding'])}',
+                ].join(' • '),
+              ),
+              trailing: Text(
+                _rupees(row['sales']),
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+        more(
+          customers.length,
+          _customers.length,
+          () => setState(() => _allCustomers = true),
+        ),
+      ],
+      heading('Item-wise report'),
+      if (_items.isEmpty)
+        const SectionCard(child: Text('No item sales in these dates.'))
+      else ...[
+        for (final row in items)
+          Card(
+            child: ListTile(
+              title: Text(row['item']?.toString() ?? ''),
+              subtitle: Text(
+                [
+                  'Qty ${plainQuantity(num.tryParse('${row['quantity']}') ?? 0)}',
+                  if (_gst) 'Taxable ${_rupees(row['taxable'])}',
+                  if (_gst) 'Tax ${_rupees(row['tax'])}',
+                ].join(' • '),
+              ),
+              trailing: Text(
+                _rupees(row['sales']),
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+        more(
+          items.length,
+          _items.length,
+          () => setState(() => _allItems = true),
+        ),
+      ],
+    ];
+  }
+
   Widget _statusMetric(String label, int value, Color color) => Column(
     children: [
       Text(
@@ -7352,27 +7273,27 @@ ${_gst ? '<PARTYGSTIN>${_xml(invoice['customer_gstin'])}</PARTYGSTIN>\n<PLACEOFS
       Text(label),
     ],
   );
-  Widget _reportLine(String label, double value, {bool bold = false}) =>
-      Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          children: [
-            Text(
-              label,
-              style: TextStyle(
-                fontWeight: bold ? FontWeight.bold : FontWeight.normal,
-              ),
-            ),
-            const Spacer(),
-            Text(
-              _money(value),
-              style: TextStyle(
-                fontWeight: bold ? FontWeight.bold : FontWeight.w600,
-              ),
-            ),
-          ],
+
+  Widget _reportLine(String label, Paise value, {bool bold = false}) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Row(
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+          ),
         ),
-      );
+        const Spacer(),
+        Text(
+          rupees(value.inRupees),
+          style: TextStyle(
+            fontWeight: bold ? FontWeight.bold : FontWeight.w600,
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class QuotationsPage extends StatefulWidget {
@@ -7382,29 +7303,58 @@ class QuotationsPage extends StatefulWidget {
   State<QuotationsPage> createState() => _QuotationsPageState();
 }
 
-class _QuotationsPageState extends State<QuotationsPage> {
-  List<Map<String, dynamic>> _quotations = [];
-  bool _loading = true;
-  String? _error;
+class _QuotationsPageState extends State<QuotationsPage>
+    with _ServerList<QuotationsPage> {
+  static const _filters = ['All', 'Draft', 'Sent', 'Accepted', 'Expired'];
+  static const _sorts = [
+    ('newest', 'Newest first'),
+    ('oldest', 'Oldest first'),
+    ('amount', 'Highest amount'),
+  ];
+
+  String _filter = 'All';
+  String _sort = 'newest';
+  int _accepted = 0;
+
+  @override
+  String get urlTab => 'quotations';
+
+  @override
+  Map<String, String> get urlFilters => {
+    'status': _filter == 'All' ? '' : _filter.toLowerCase(),
+    'sort': _sort == 'newest' ? '' : _sort,
+  };
+
+  @override
+  void readUrlFilters(Map<String, String> params) {
+    final status = params['status'] ?? '';
+    _filter = _filters.firstWhere(
+      (filter) => filter.toLowerCase() == status,
+      orElse: () => 'All',
+    );
+    _sort = _sorts.any((sort) => sort.$1 == params['sort'])
+        ? params['sort']!
+        : 'newest';
+    _searching = (params['q'] ?? '').isNotEmpty;
+  }
 
   @override
   void initState() {
     super.initState();
-    _load();
-    LiveSync.changes.addListener(_load);
+    initServerList();
+    invoiceChanges.addListener(_loadAccepted);
+    _expireOld();
   }
 
   @override
   void dispose() {
-    LiveSync.changes.removeListener(_load);
+    invoiceChanges.removeListener(_loadAccepted);
+    disposeServerList();
     super.dispose();
   }
 
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  /// Marks quotations past their "valid until" date as expired, once.
+  Future<void> _expireOld() async {
     try {
       final today = DateTime.now().toIso8601String().substring(0, 10);
       await Supabase.instance.client
@@ -7412,28 +7362,71 @@ class _QuotationsPageState extends State<QuotationsPage> {
           .update({'status': 'expired'})
           .inFilter('status', ['draft', 'sent'])
           .lt('valid_until', today);
-      final rows = await Supabase.instance.client
-          .from('quotations')
-          .select(
-            'id, quotation_number, customer_name, quotation_date, valid_until, status, subtotal, tax_amount, total_amount, cgst_amount, sgst_amount, igst_amount, converted_invoice_id, terms, place_of_supply',
-          )
-          .order('quotation_date', ascending: false)
-          .limit(100);
-      if (mounted) {
-        setState(() => _quotations = List<Map<String, dynamic>>.from(rows));
-      }
-    } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
-    } finally {
-      if (mounted) setState(() => _loading = false);
+    } catch (_) {
+      // Shown as they are; the next visit tries again.
     }
+    if (!mounted) return;
+    await _loadAccepted();
+    await rows.refresh();
+  }
+
+  /// Accepted quotations not yet turned into invoices, in all.
+  Future<void> _loadAccepted() async {
+    try {
+      final response = await Supabase.instance.client
+          .from('quotations')
+          .select('id')
+          .eq('status', 'accepted')
+          .isFilter('converted_invoice_id', null)
+          .count(CountOption.exact);
+      if (mounted) setState(() => _accepted = response.count);
+    } catch (_) {
+      // The banner keeps its last count.
+    }
+  }
+
+  @override
+  Future<PageResult> fetchPage(int from, int to) async {
+    var query = Supabase.instance.client
+        .from('quotations')
+        .select(
+          'id, quotation_number, customer_name, quotation_date, valid_until, status, subtotal, tax_amount, total_amount, cgst_amount, sgst_amount, igst_amount, converted_invoice_id, terms, place_of_supply',
+        );
+    if (_filter != 'All') {
+      // A converted quotation shows as "converted", not its status.
+      query = query
+          .eq('status', _filter.toLowerCase())
+          .isFilter('converted_invoice_id', null);
+    }
+    final term = _searchTerm(search.text);
+    if (term.isNotEmpty) {
+      query = query.or(_ilikeAny(['quotation_number', 'customer_name'], term));
+    }
+    return _pageOf(
+      switch (_sort) {
+        'oldest' =>
+          query
+              .order('quotation_date', ascending: true)
+              .order('quotation_number', ascending: true),
+        'amount' =>
+          query
+              .order('total_amount', ascending: false)
+              .order('quotation_date', ascending: false),
+        _ =>
+          query
+              .order('quotation_date', ascending: false)
+              .order('quotation_number', ascending: false),
+      },
+      from,
+      to,
+    );
   }
 
   Future<void> _newQuotation() async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => const QuotationBuilderPage()),
     );
-    await _load();
+    await rows.refresh();
   }
 
   Future<void> _editQuotation(Map<String, dynamic> quotation) async {
@@ -7450,7 +7443,7 @@ class _QuotationsPageState extends State<QuotationsPage> {
         builder: (_) => QuotationBuilderPage(quotation: quotation),
       ),
     );
-    await _load();
+    await rows.refresh();
   }
 
   Future<void> _duplicateQuotation(Map<String, dynamic> quotation) async {
@@ -7460,7 +7453,7 @@ class _QuotationsPageState extends State<QuotationsPage> {
             QuotationBuilderPage(quotation: quotation, duplicate: true),
       ),
     );
-    await _load();
+    await rows.refresh();
   }
 
   Future<void> _openPreview(Map<String, dynamic> quotation) async {
@@ -7480,7 +7473,7 @@ class _QuotationsPageState extends State<QuotationsPage> {
           .from('quotations')
           .update({'status': status})
           .eq('id', quotation['id']);
-      await _load();
+      await rows.refresh();
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -7538,7 +7531,7 @@ class _QuotationsPageState extends State<QuotationsPage> {
               InvoiceBuilderPage(sourceInvoice: invoice, editExisting: true),
         ),
       );
-      await _load();
+      await rows.refresh();
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -7548,9 +7541,7 @@ class _QuotationsPageState extends State<QuotationsPage> {
     }
   }
 
-  String _filter = 'All';
   bool _searching = false;
-  final _search = TextEditingController();
 
   String _statusOf(Map<String, dynamic> quote) =>
       quote['converted_invoice_id'] == null
@@ -7567,7 +7558,7 @@ class _QuotationsPageState extends State<QuotationsPage> {
         if (validUntil != null) 'till ${screenDate(validUntil)}',
       ].join(' · '),
       date: null,
-      amount: (quote['total_amount'] as num?)?.toDouble() ?? 0,
+      amount: Paise.parse(quote['total_amount']).inRupees,
       status: _statusOf(quote),
       onTap: () => _openPreview(quote),
       menu: PopupMenuButton<String>(
@@ -7608,18 +7599,6 @@ class _QuotationsPageState extends State<QuotationsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final query = _search.text.trim().toLowerCase();
-    final shown = _quotations.where((quote) {
-      final status = _statusOf(quote);
-      if (_filter != 'All' && status != _filter.toLowerCase()) return false;
-      return query.isEmpty ||
-          '${quote['quotation_number'] ?? ''} ${quote['customer_name'] ?? ''}'
-              .toLowerCase()
-              .contains(query);
-    }).toList();
-    final accepted = _quotations
-        .where((quote) => _statusOf(quote) == 'accepted')
-        .toList();
     return Scaffold(
       floatingActionButton: BusinessAccess.readOnly
           ? null
@@ -7634,140 +7613,133 @@ class _QuotationsPageState extends State<QuotationsPage> {
                 SquareIconButton(
                   icon: _searching ? Icons.close : Icons.search,
                   tooltip: _searching ? 'Close search' : 'Search quotations',
-                  onPressed: () => setState(() {
-                    _searching = !_searching;
-                    if (!_searching) _search.clear();
-                  }),
+                  onPressed: () {
+                    final hadSearch = hasSearch;
+                    setState(() {
+                      _searching = !_searching;
+                      if (!_searching) search.clear();
+                    });
+                    if (!_searching && hadSearch) filtersChanged();
+                  },
+                ),
+                _SortButton(
+                  options: _sorts,
+                  selected: _sort,
+                  onSelected: (value) {
+                    setState(() => _sort = value);
+                    filtersChanged();
+                  },
                 ),
               ],
             ),
             Expanded(
-              child: _loading && _quotations.isEmpty
-                  ? ListView(
-                      padding: const EdgeInsets.all(16),
-                      children: const [SkeletonRows()],
-                    )
-                  : _error != null
-                  ? _loadError('Quotations are not ready yet.\n$_error', _load)
-                  : RefreshIndicator(
-                      onRefresh: _load,
-                      child: ListView(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
-                        children: [
-                          if (_searching) ...[
-                            _ListSearch(
-                              controller: _search,
-                              hint: 'Search quotations, customers',
-                              onChanged: (_) => setState(() {}),
-                            ),
-                            const SizedBox(height: 10),
-                          ],
-                          _FilterChips(
-                            options: const [
-                              'All',
-                              'Draft',
-                              'Sent',
-                              'Accepted',
-                              'Expired',
-                            ],
-                            selected: _filter,
-                            onSelected: (value) =>
-                                setState(() => _filter = value),
-                          ),
-                          const SizedBox(height: 12),
-                          if (accepted.isNotEmpty &&
-                              !BusinessAccess.readOnly) ...[
-                            Pressable(
-                              onTap: () => setState(() => _filter = 'Accepted'),
-                              color: SimplekColors.skyTint,
-                              borderRadius: BorderRadius.circular(16),
-                              child: Container(
-                                padding: const EdgeInsets.all(14),
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(
-                                    color: SimplekColors.skyLine,
-                                  ),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Container(
-                                      width: 40,
-                                      height: 40,
-                                      decoration: BoxDecoration(
-                                        color: Colors.white,
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      child: const Icon(
-                                        Icons.check,
-                                        color: SimplekColors.skyText,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            '${accepted.length} accepted quotation${accepted.length == 1 ? '' : 's'}',
-                                            style: inter(
-                                              15,
-                                              FontWeight.w700,
-                                              SimplekColors.navy,
-                                            ),
-                                          ),
-                                          Text(
-                                            'Turn them into invoices in one tap',
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: inter(
-                                              13,
-                                              FontWeight.w500,
-                                              SimplekColors.skyText,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    const Icon(
-                                      Icons.chevron_right,
-                                      color: SimplekColors.skyText,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                          ],
-                          if (_quotations.isEmpty)
-                            EmptyState(
-                              icon: Icons.description_outlined,
-                              message:
-                                  'No quotations yet. Send prices before you bill.',
-                              actionLabel: BusinessAccess.readOnly
-                                  ? null
-                                  : 'Create quotation',
-                              onAction: _newQuotation,
-                            )
-                          else if (shown.isEmpty)
-                            const EmptyState(
-                              icon: Icons.search_off,
-                              message: 'No quotations match this filter.',
-                            )
-                          else
-                            RowGroup(
-                              children: [for (final q in shown) _quoteRow(q)],
-                            ),
-                        ],
-                      ),
+              child: pagedListBody(
+                noun: 'quotations',
+                filtered: hasSearch || _filter != 'All',
+                header: [
+                  if (_searching) ...[
+                    _ListSearch(
+                      controller: search,
+                      hint: 'Search quotations, customers',
+                      onChanged: onSearchChanged,
                     ),
+                    const SizedBox(height: 10),
+                  ],
+                  _FilterChips(
+                    options: _filters,
+                    selected: _filter,
+                    onSelected: (value) {
+                      setState(() => _filter = value);
+                      filtersChanged();
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  if (_accepted > 0 && !BusinessAccess.readOnly) ...[
+                    _AcceptedBanner(
+                      count: _accepted,
+                      onTap: () {
+                        setState(() => _filter = 'Accepted');
+                        filtersChanged();
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                ],
+                empty: EmptyState(
+                  icon: Icons.description_outlined,
+                  message: 'No quotations yet. Send prices before you bill.',
+                  actionLabel: BusinessAccess.readOnly
+                      ? null
+                      : 'Create quotation',
+                  onAction: _newQuotation,
+                ),
+                noMatch: const EmptyState(
+                  icon: Icons.search_off,
+                  message: 'No quotations match this search or filter.',
+                ),
+                build: (list) => [
+                  RowGroup(children: [for (final q in list) _quoteRow(q)]),
+                ],
+              ),
             ),
           ],
         ),
       ),
     );
   }
+}
+
+/// "3 accepted quotations — turn them into invoices in one tap".
+class _AcceptedBanner extends StatelessWidget {
+  const _AcceptedBanner({required this.count, required this.onTap});
+  final int count;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Pressable(
+    onTap: onTap,
+    color: SimplekColors.skyTint,
+    borderRadius: BorderRadius.circular(16),
+    child: Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: SimplekColors.skyLine),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.check, color: SimplekColors.skyText),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$count accepted quotation${count == 1 ? '' : 's'}',
+                  style: inter(15, FontWeight.w700, SimplekColors.navy),
+                ),
+                Text(
+                  'Turn them into invoices in one tap',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: inter(13, FontWeight.w500, SimplekColors.skyText),
+                ),
+              ],
+            ),
+          ),
+          const Icon(Icons.chevron_right, color: SimplekColors.skyText),
+        ],
+      ),
+    ),
+  );
 }
 
 class QuotationBuilderPage extends StatefulWidget {
@@ -8554,69 +8526,164 @@ class InvoiceHistoryPage extends StatefulWidget {
   State<InvoiceHistoryPage> createState() => _InvoiceHistoryPageState();
 }
 
-class _InvoiceHistoryPageState extends State<InvoiceHistoryPage> {
-  List<Map<String, dynamic>> _invoices = [];
-  bool _isLoading = true;
-  String? _error;
+class _InvoiceHistoryPageState extends State<InvoiceHistoryPage>
+    with _ServerList<InvoiceHistoryPage> {
+  static const _filters = ['All', 'Unpaid', 'Partial', 'Paid'];
+  static const _sorts = [
+    ('newest', 'Newest first'),
+    ('oldest', 'Oldest first'),
+    ('amount', 'Highest amount'),
+    ('due', 'Most due'),
+  ];
+
+  String _filter = 'All';
+  String _sort = 'newest';
+  DatePeriod _period = DatePeriod.all;
+  _Totals _totals = _Totals.empty;
+  _Totals _thisMonth = _Totals.empty;
+
+  @override
+  String get urlTab => 'invoices';
+
+  @override
+  Map<String, String> get urlFilters => {
+    'status': _filter == 'All' ? '' : _filter.toLowerCase(),
+    'sort': _sort == 'newest' ? '' : _sort,
+    ..._period.toUrl(),
+  };
+
+  @override
+  void readUrlFilters(Map<String, String> params) {
+    final status = params['status'] ?? '';
+    _filter = _filters.firstWhere(
+      (filter) => filter.toLowerCase() == status,
+      orElse: () => 'All',
+    );
+    _sort = _sorts.any((sort) => sort.$1 == params['sort'])
+        ? params['sort']!
+        : 'newest';
+    _period = DatePeriod.fromUrl(params);
+  }
 
   @override
   void initState() {
     super.initState();
-    _loadInvoices();
-    LiveSync.changes.addListener(_loadInvoices);
+    initServerList();
+    invoiceChanges.addListener(_loadTotals);
+    _syncDrafts();
+    _loadTotals();
   }
 
   @override
   void dispose() {
-    LiveSync.changes.removeListener(_loadInvoices);
-    _search.dispose();
+    invoiceChanges.removeListener(_loadTotals);
+    disposeServerList();
     super.dispose();
   }
 
-  Future<void> _loadInvoices() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
+  /// Sends invoices saved offline, then shows the list again.
+  Future<void> _syncDrafts() async {
     try {
-      final syncedDrafts = await OfflineStore.flushInvoiceDrafts();
-      if (mounted) {
-        unawaited(
-          _showSyncRejections(
-            context,
-            'invoice_drafts',
-            (item) =>
-                'Invoice for ${(item['header'] as Map?)?['customer_name'] ?? 'a customer'}',
-          ),
+      final synced = await OfflineStore.flushInvoiceDrafts();
+      if (!mounted) return;
+      unawaited(
+        _showSyncRejections(
+          context,
+          'invoice_drafts',
+          (item) =>
+              'Invoice for ${(item['header'] as Map?)?['customer_name'] ?? 'a customer'}',
+        ),
+      );
+      if (synced > 0) {
+        await rows.refresh();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$synced offline invoice(s) synced')),
         );
       }
-      final rows = await Supabase.instance.client
-          .from('invoices')
-          .select(
-            'id, invoice_number, customer_name, customer_gstin, invoice_date, due_date, status, total_amount, paid_amount, balance_amount, terms, place_of_supply',
-          )
-          .order('invoice_date', ascending: false)
-          .limit(100);
-      if (mounted) {
-        setState(() => _invoices = List<Map<String, dynamic>>.from(rows));
-        if (syncedDrafts > 0) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('$syncedDrafts offline invoice(s) synced')),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) setState(() => _error = 'Unable to load invoices: $e');
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
+    } catch (_) {
+      // The list loads anyway; the drafts stay queued for the next try.
     }
+  }
+
+  /// "To collect" over all invoices, "Paid this month" over this month's.
+  Future<void> _loadTotals() async {
+    try {
+      final now = DateTime.now();
+      final results = await Future.wait([
+        _Totals.load(),
+        _Totals.load(
+          from: DateTime(now.year, now.month),
+          to: DateTime(now.year, now.month + 1, 0),
+        ),
+      ]);
+      if (mounted) {
+        setState(() {
+          _totals = results[0];
+          _thisMonth = results[1];
+        });
+      }
+    } catch (_) {
+      // The tiles keep their last values; the list shows its own error.
+    }
+  }
+
+  @override
+  Future<PageResult> fetchPage(int from, int to) async {
+    PostgrestFilterBuilder<PostgrestList> query = Supabase.instance.client
+        .from('invoices')
+        .select(
+          'id, invoice_number, customer_name, customer_gstin, invoice_date, due_date, status, total_amount, paid_amount, balance_amount, terms, place_of_supply',
+        );
+    switch (_filter) {
+      case 'Unpaid':
+        query = query.gt('balance_amount', 0).neq('status', 'cancelled');
+      case 'Partial':
+        query = query.eq('status', 'partial');
+      case 'Paid':
+        query = query.eq('status', 'paid');
+    }
+    if (_period.fromDb != null) {
+      query = query
+          .gte('invoice_date', _period.fromDb!)
+          .lte('invoice_date', _period.toDb!);
+    }
+    final term = _searchTerm(search.text);
+    if (term.isNotEmpty) {
+      query = query.or(
+        _ilikeAny([
+          'invoice_number',
+          'customer_name',
+          if (BusinessSettings.isGstRegistered.value) 'customer_gstin',
+        ], term),
+      );
+    }
+    final ordered = switch (_sort) {
+      'oldest' =>
+        query
+            .order('invoice_date', ascending: true)
+            .order('invoice_number', ascending: true),
+      'amount' =>
+        query
+            .order('total_amount', ascending: false)
+            .order('invoice_date', ascending: false),
+      'due' =>
+        query
+            .order('balance_amount', ascending: false)
+            .order('invoice_date', ascending: false),
+      _ =>
+        query
+            .order('invoice_date', ascending: false)
+            .order('invoice_number', ascending: false),
+    };
+    return _pageOf(ordered, from, to);
   }
 
   Future<void> _newInvoice() async {
     await Navigator.of(
       context,
     ).push(MaterialPageRoute<void>(builder: (_) => const InvoiceBuilderPage()));
-    await _loadInvoices();
+    await rows.refresh();
   }
 
   Future<void> _openInvoice(Map<String, dynamic> invoice) async {
@@ -8625,7 +8692,7 @@ class _InvoiceHistoryPageState extends State<InvoiceHistoryPage> {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => InvoiceViewPage(invoiceId: id)),
     );
-    if (mounted) await _loadInvoices();
+    if (mounted) await rows.refresh();
   }
 
   Future<void> _duplicateInvoice(Map<String, dynamic> invoice) async {
@@ -8634,7 +8701,7 @@ class _InvoiceHistoryPageState extends State<InvoiceHistoryPage> {
         builder: (_) => InvoiceBuilderPage(sourceInvoice: invoice),
       ),
     );
-    await _loadInvoices();
+    await rows.refresh();
   }
 
   Future<void> _editInvoice(Map<String, dynamic> invoice) async {
@@ -8645,7 +8712,7 @@ class _InvoiceHistoryPageState extends State<InvoiceHistoryPage> {
             InvoiceBuilderPage(sourceInvoice: invoice, editExisting: true),
       ),
     );
-    await _loadInvoices();
+    await rows.refresh();
   }
 
   Future<void> _deleteInvoice(Map<String, dynamic> invoice) async {
@@ -8655,30 +8722,7 @@ class _InvoiceHistoryPageState extends State<InvoiceHistoryPage> {
       context,
       invoiceId: id,
       number: invoice['invoice_number']?.toString() ?? '',
-      onChanged: () {
-        if (mounted) _loadInvoices();
-      },
     );
-  }
-
-  final _search = TextEditingController();
-  String _filter = 'All';
-
-  bool _matches(Map<String, dynamic> invoice) {
-    final status = invoice['status']?.toString() ?? '';
-    final balance = (invoice['balance_amount'] as num?)?.toDouble() ?? 0;
-    final keep = switch (_filter) {
-      'Unpaid' => balance > 0 && status != 'cancelled',
-      'Partial' => status == 'partial',
-      'Paid' => status == 'paid',
-      _ => true,
-    };
-    if (!keep) return false;
-    final query = _search.text.trim().toLowerCase();
-    if (query.isEmpty) return true;
-    return '${invoice['invoice_number'] ?? ''} ${invoice['customer_name'] ?? ''} ${invoice['customer_gstin'] ?? ''}'
-        .toLowerCase()
-        .contains(query);
   }
 
   Widget _row(Map<String, dynamic> invoice) {
@@ -8688,7 +8732,7 @@ class _InvoiceHistoryPageState extends State<InvoiceHistoryPage> {
       title: invoice['customer_name']?.toString() ?? '',
       number: invoice['invoice_number']?.toString() ?? 'Invoice',
       date: parseStoredDate(invoice['invoice_date']),
-      amount: (invoice['total_amount'] as num?)?.toDouble() ?? 0,
+      amount: Paise.parse(invoice['total_amount']).inRupees,
       status: status,
       onTap: () => _openInvoice(invoice),
       menu: PopupMenuButton<String>(
@@ -8718,27 +8762,8 @@ class _InvoiceHistoryPageState extends State<InvoiceHistoryPage> {
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final shown = _invoices.where(_matches).toList();
-    final toCollect = _invoices
-        .where((invoice) => invoice['status']?.toString() != 'cancelled')
-        .fold<double>(
-          0,
-          (sum, invoice) =>
-              sum + ((invoice['balance_amount'] as num?)?.toDouble() ?? 0),
-        );
-    final paidThisMonth = _invoices
-        .where((invoice) {
-          final date = parseStoredDate(invoice['invoice_date']);
-          return date != null &&
-              date.year == now.year &&
-              date.month == now.month;
-        })
-        .fold<double>(
-          0,
-          (sum, invoice) =>
-              sum + ((invoice['paid_amount'] as num?)?.toDouble() ?? 0),
-        );
+    final filtered =
+        hasSearch || _filter != 'All' || _period.preset != DatePreset.all;
     return Scaffold(
       floatingActionButton: BusinessAccess.readOnly
           ? null
@@ -8747,74 +8772,86 @@ class _InvoiceHistoryPageState extends State<InvoiceHistoryPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const _PageHeader(title: 'Invoices'),
+            _PageHeader(
+              title: 'Invoices',
+              actions: [
+                _SortButton(
+                  options: _sorts,
+                  selected: _sort,
+                  onSelected: (value) {
+                    setState(() => _sort = value);
+                    filtersChanged();
+                  },
+                ),
+              ],
+            ),
             Expanded(
-              child: _isLoading && _invoices.isEmpty
-                  ? ListView(
-                      padding: const EdgeInsets.all(16),
-                      children: const [SkeletonRows()],
-                    )
-                  : _error != null
-                  ? _loadError(_error!, _loadInvoices)
-                  : RefreshIndicator(
-                      onRefresh: _loadInvoices,
-                      child: ListView(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
-                        children: [
-                          _ListSearch(
-                            controller: _search,
-                            hint: 'Search invoices, customers',
-                            onChanged: (_) => setState(() {}),
-                          ),
-                          const SizedBox(height: 10),
-                          _FilterChips(
-                            options: const ['All', 'Unpaid', 'Partial', 'Paid'],
-                            selected: _filter,
-                            onSelected: (value) =>
-                                setState(() => _filter = value),
-                          ),
-                          const SizedBox(height: 10),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: StatTile(
-                                  label: 'To collect',
-                                  value: rupees(toCollect),
-                                  tone: TileTone.orange,
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: StatTile(
-                                  label: 'Paid this month',
-                                  value: rupees(paidThisMonth),
-                                  tone: TileTone.sky,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-                          if (_invoices.isEmpty)
-                            EmptyState(
-                              icon: Icons.receipt_long_outlined,
-                              message:
-                                  'No invoices yet. Create your first invoice.',
-                              actionLabel: BusinessAccess.readOnly
-                                  ? null
-                                  : 'Create invoice',
-                              onAction: _newInvoice,
-                            )
-                          else if (shown.isEmpty)
-                            const EmptyState(
-                              icon: Icons.search_off,
-                              message:
-                                  'No invoices match this search or filter.',
-                            )
-                          else
-                            ..._monthGroups(shown, 'invoice_date', _row),
-                        ],
+              child: pagedListBody(
+                noun: 'invoices',
+                filtered: filtered,
+                header: [
+                  _ListSearch(
+                    controller: search,
+                    hint: 'Search invoices, customers',
+                    onChanged: onSearchChanged,
+                  ),
+                  const SizedBox(height: 10),
+                  _FilterChips(
+                    options: _filters,
+                    selected: _filter,
+                    onSelected: (value) {
+                      setState(() => _filter = value);
+                      filtersChanged();
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  _PeriodButton(
+                    period: _period,
+                    onChanged: (period) {
+                      setState(() => _period = period);
+                      filtersChanged();
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: StatTile(
+                          label: 'To collect',
+                          value: rupees(_totals.money('to_collect').inRupees),
+                          tone: TileTone.orange,
+                        ),
                       ),
-                    ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: StatTile(
+                          label: 'Paid this month',
+                          value: rupees(_thisMonth.money('collected').inRupees),
+                          tone: TileTone.sky,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                ],
+                empty: EmptyState(
+                  icon: Icons.receipt_long_outlined,
+                  message: 'No invoices yet. Create your first invoice.',
+                  actionLabel: BusinessAccess.readOnly
+                      ? null
+                      : 'Create invoice',
+                  onAction: _newInvoice,
+                ),
+                noMatch: const EmptyState(
+                  icon: Icons.search_off,
+                  message: 'No invoices match this search or filter.',
+                ),
+                build: (list) => _sort == 'newest' || _sort == 'oldest'
+                    ? _monthGroups(list, 'invoice_date', _row)
+                    : [
+                        RowGroup(children: [for (final row in list) _row(row)]),
+                      ],
+              ),
             ),
           ],
         ),
@@ -10794,35 +10831,86 @@ class ProductsPage extends StatefulWidget {
   State<ProductsPage> createState() => _ProductsPageState();
 }
 
-class _ProductsPageState extends State<ProductsPage> {
-  final _searchController = TextEditingController();
-  List<Map<String, dynamic>> _products = [];
-  bool _isLoading = true;
-  String? _errorMessage;
+class _ProductsPageState extends State<ProductsPage>
+    with _ServerList<ProductsPage> {
+  static const _filters = ['All', 'Products', 'Services'];
+  static const _sorts = [
+    ('name', 'Name A–Z'),
+    ('newest', 'Newest first'),
+    ('price', 'Highest price'),
+  ];
+
+  String _filter = 'All';
+  String _sort = 'name';
   bool _showingCached = false;
+  int _products = 0;
+  int _services = 0;
+
+  @override
+  String get urlTab => 'items';
+
+  @override
+  Map<String, String> get urlFilters => {
+    'status': _filter == 'All' ? '' : _filter.toLowerCase(),
+    'sort': _sort == 'name' ? '' : _sort,
+  };
+
+  @override
+  void readUrlFilters(Map<String, String> params) {
+    final status = params['status'] ?? '';
+    _filter = _filters.firstWhere(
+      (filter) => filter.toLowerCase() == status,
+      orElse: () => 'All',
+    );
+    _sort = _sorts.any((sort) => sort.$1 == params['sort'])
+        ? params['sort']!
+        : 'name';
+  }
 
   @override
   void initState() {
     super.initState();
-    _searchController.addListener(_applySearch);
-    _loadProducts();
-    LiveSync.changes.addListener(_loadProducts);
+    initServerList();
+    invoiceChanges.addListener(_loadCounts);
+    _loadCounts();
   }
 
   @override
   void dispose() {
-    _searchController
-      ..removeListener(_applySearch)
-      ..dispose();
-    LiveSync.changes.removeListener(_loadProducts);
+    invoiceChanges.removeListener(_loadCounts);
+    disposeServerList();
     super.dispose();
   }
 
-  Future<void> _loadProducts() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
+  /// How many products and services there are in all.
+  Future<void> _loadCounts() async {
+    Future<int> count(String type) async =>
+        (await Supabase.instance.client
+                .from('products')
+                .select('id')
+                .eq('is_active', true)
+                .eq('product_type', type)
+                .count(CountOption.exact))
+            .count;
+    try {
+      final counts = await Future.wait([count('product'), count('service')]);
+      if (mounted) {
+        setState(() {
+          _products = counts[0];
+          _services = counts[1];
+        });
+      }
+    } catch (_) {
+      // The tiles keep their last values.
+    }
+  }
+
+  static const _columns =
+      'id, name, product_type, selling_price, uqc_code, hsn_sac_id, hsn_sac_code, hsn_sac_description, gst_rate, is_active';
+
+  @override
+  Future<PageResult> fetchPage(int from, int to) async {
+    final term = _searchTerm(search.text);
     try {
       await OfflineStore.flush('products', 'products');
       if (mounted) {
@@ -10834,63 +10922,75 @@ class _ProductsPageState extends State<ProductsPage> {
           ),
         );
       }
-      final rows = await Supabase.instance.client
+      var query = Supabase.instance.client
           .from('products')
-          .select(
-            'id, name, product_type, selling_price, uqc_code, hsn_sac_id, hsn_sac_code, hsn_sac_description, gst_rate, is_active',
-          )
-          .eq('is_active', true)
-          .order('name');
-      if (!mounted) return;
-      final products = List<Map<String, dynamic>>.from(rows);
-      await OfflineStore.writeList('products', products);
-      setState(() {
-        _products = products;
-        _showingCached = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      final cached = await OfflineStore.readList('products');
-      setState(() {
-        _products = cached;
-        _showingCached = cached.isNotEmpty;
-        _errorMessage = cached.isEmpty ? 'Unable to load products: $e' : null;
-      });
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
+          .select(_columns)
+          .eq('is_active', true);
+      if (_filter != 'All') {
+        query = query.eq(
+          'product_type',
+          _filter == 'Services' ? 'service' : 'product',
+        );
+      }
+      if (term.isNotEmpty) {
+        query = query.or(_ilikeAny(['name', 'uqc_code', 'hsn_sac_code'], term));
+      }
+      final page = await _pageOf(
+        switch (_sort) {
+          'newest' => query.order('created_at', ascending: false),
+          'price' =>
+            query
+                .order('selling_price', ascending: false, nullsFirst: false)
+                .order('name'),
+          _ => query.order('name'),
+        },
+        from,
+        to,
+      );
+      unawaited(OfflineStore.mergeCached('products', page.rows));
+      _showingCached = false;
+      return page;
+    } catch (error) {
+      // Offline: the items this device has seen, filtered here.
+      if (from != 0) rethrow;
+      final query = term.toLowerCase();
+      final cached = (await OfflineStore.readList('products')).where((row) {
+        if (_filter == 'Services' && row['product_type'] != 'service') {
+          return false;
+        }
+        if (_filter == 'Products' && row['product_type'] == 'service') {
+          return false;
+        }
+        return '${row['name'] ?? ''} ${row['uqc_code'] ?? ''} '
+                '${row['hsn_sac_code'] ?? ''}'
+            .toLowerCase()
+            .contains(query);
+      }).toList();
+      if (cached.isEmpty) rethrow;
+      _showingCached = true;
+      return PageResult(cached, cached.length);
     }
   }
-
-  void _applySearch() => setState(() {});
 
   Future<void> _addProduct() async {
     final saved = await Navigator.of(context).push<bool>(
       MaterialPageRoute<bool>(builder: (_) => const AddProductPage()),
     );
-    if (saved == true) await _loadProducts();
+    if (saved == true) {
+      await rows.refresh();
+      await _loadCounts();
+    }
   }
 
   Future<void> _editProduct(Map<String, dynamic> product) async {
     final saved = await Navigator.of(context).push<bool>(
       MaterialPageRoute<bool>(builder: (_) => AddProductPage(product: product)),
     );
-    if (saved == true) await _loadProducts();
+    if (saved == true) await rows.refresh();
   }
 
   @override
   Widget build(BuildContext context) {
-    final query = _searchController.text.trim().toLowerCase();
-    final visibleProducts = _products.where((product) {
-      final searchable =
-          '${product['name'] ?? ''} ${product['product_type'] ?? ''} '
-                  '${product['uqc_code'] ?? ''} ${product['hsn_sac_code'] ?? ''}'
-              .toLowerCase();
-      return searchable.contains(query);
-    }).toList();
-    final services = _products
-        .where((product) => product['product_type'] == 'service')
-        .length;
-
     return Scaffold(
       floatingActionButton: BusinessAccess.readOnly
           ? null
@@ -10899,141 +10999,134 @@ class _ProductsPageState extends State<ProductsPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _PageHeader(title: _showingCached ? 'Items (offline)' : 'Items'),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-              child: _ListSearch(
-                controller: _searchController,
-                hint: 'Search name, type or unit',
-                onChanged: (_) {},
-              ),
+            _PageHeader(
+              title: _showingCached ? 'Items (offline)' : 'Items',
+              actions: [
+                _SortButton(
+                  options: _sorts,
+                  selected: _sort,
+                  onSelected: (value) {
+                    setState(() => _sort = value);
+                    filtersChanged();
+                  },
+                ),
+              ],
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: StatTile(
-                      label: 'Products',
-                      value: '${_products.length - services}',
-                      tone: TileTone.orange,
-                    ),
+            Expanded(
+              child: pagedListBody(
+                noun: 'items',
+                filtered: hasSearch || _filter != 'All',
+                header: [
+                  _ListSearch(
+                    controller: search,
+                    hint: BusinessSettings.isGstRegistered.value
+                        ? 'Search name, unit or HSN/SAC'
+                        : 'Search name or unit',
+                    onChanged: onSearchChanged,
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: StatTile(
-                      label: 'Services',
-                      value: '$services',
-                      tone: TileTone.sky,
-                    ),
+                  const SizedBox(height: 10),
+                  _FilterChips(
+                    options: _filters,
+                    selected: _filter,
+                    onSelected: (value) {
+                      setState(() => _filter = value);
+                      filtersChanged();
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: StatTile(
+                          label: 'Products',
+                          value: '$_products',
+                          tone: TileTone.orange,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: StatTile(
+                          label: 'Services',
+                          value: '$_services',
+                          tone: TileTone.sky,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                empty: EmptyState(
+                  icon: Icons.inventory_2_outlined,
+                  message:
+                      'No products or services yet. Add one to use it in invoices.',
+                  actionLabel: BusinessAccess.readOnly ? null : 'Add item',
+                  onAction: _addProduct,
+                ),
+                noMatch: const EmptyState(
+                  icon: Icons.inventory_2_outlined,
+                  message: 'No items match this search or filter.',
+                ),
+                build: (list) => [
+                  RowGroup(
+                    children: [for (final product in list) _row(product)],
                   ),
                 ],
               ),
             ),
-            Expanded(child: _buildBody(visibleProducts)),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildBody(List<Map<String, dynamic>> visibleProducts) {
-    if (_isLoading && _products.isEmpty) {
-      return ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        children: const [SkeletonRows()],
-      );
-    }
-    if (_errorMessage != null) return _loadError(_errorMessage!, _loadProducts);
-    final hasSearch = _searchController.text.trim().isNotEmpty;
+  Widget _row(Map<String, dynamic> product) {
     final gst = BusinessSettings.isGstRegistered.value;
-    return RefreshIndicator(
-      onRefresh: _loadProducts,
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
+    final service = product['product_type'] == 'service';
+    final price = product['selling_price'];
+    final details = [
+      service ? 'Service' : 'Product',
+      if (gst && product['gst_rate'] != null)
+        'GST ${percent(num.tryParse('${product['gst_rate']}') ?? 0)}',
+      if (gst && product['hsn_sac_code'] != null)
+        '${service ? 'SAC' : 'HSN'} ${product['hsn_sac_code']}',
+      if (product['uqc_code'] != null) product['uqc_code'].toString(),
+    ].join(' · ');
+    return ListRowTile(
+      leading: IconTile(
+        service ? Icons.sell_outlined : Icons.inventory_2_outlined,
+        tone: service ? TileTone.sky : TileTone.orange,
+        size: 42,
+      ),
+      title: product['name']?.toString() ?? 'Unnamed item',
+      subtitle: details,
+      onTap: BusinessAccess.readOnly ? null : () => _editProduct(product),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          if (visibleProducts.isEmpty)
-            EmptyState(
-              icon: Icons.inventory_2_outlined,
-              message: hasSearch
-                  ? 'No items match this search.'
-                  : 'No products or services yet. Add one to use it in invoices.',
-              actionLabel: hasSearch || BusinessAccess.readOnly
-                  ? null
-                  : 'Add item',
-              onAction: _addProduct,
-            )
-          else
-            RowGroup(
-              children: [
-                for (final product in visibleProducts)
-                  Builder(
-                    builder: (context) {
-                      final service = product['product_type'] == 'service';
-                      final price = product['selling_price'];
-                      final details = [
-                        service ? 'Service' : 'Product',
-                        if (gst && product['gst_rate'] != null)
-                          'GST ${percent(num.tryParse('${product['gst_rate']}') ?? 0)}',
-                        if (gst && product['hsn_sac_code'] != null)
-                          '${service ? 'SAC' : 'HSN'} ${product['hsn_sac_code']}',
-                        if (product['uqc_code'] != null)
-                          product['uqc_code'].toString(),
-                      ].join(' · ');
-                      return ListRowTile(
-                        leading: IconTile(
-                          service
-                              ? Icons.sell_outlined
-                              : Icons.inventory_2_outlined,
-                          tone: service ? TileTone.sky : TileTone.orange,
-                          size: 42,
-                        ),
-                        title: product['name']?.toString() ?? 'Unnamed item',
-                        subtitle: details,
-                        onTap: BusinessAccess.readOnly
-                            ? null
-                            : () => _editProduct(product),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (price != null)
-                              Text(
-                                rupees(num.tryParse('$price') ?? 0),
-                                maxLines: 1,
-                                style: inter(
-                                  15,
-                                  FontWeight.w700,
-                                  Theme.of(context).colorScheme.onSurface,
-                                ),
-                              ),
-                            if (!BusinessAccess.readOnly)
-                              PopupMenuButton<String>(
-                                tooltip: 'Item actions',
-                                onSelected: (value) => value == 'edit'
-                                    ? _editProduct(product)
-                                    : _removeCatalogEntry(
-                                        context,
-                                        'products',
-                                        product,
-                                        _loadProducts,
-                                      ),
-                                itemBuilder: (_) => const [
-                                  PopupMenuItem(
-                                    value: 'edit',
-                                    child: Text('Edit item'),
-                                  ),
-                                  PopupMenuItem(
-                                    value: 'delete',
-                                    child: Text('Delete item'),
-                                  ),
-                                ],
-                              ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
+          if (price != null)
+            Text(
+              rupees(Paise.parse(price).inRupees),
+              maxLines: 1,
+              style: inter(
+                15,
+                FontWeight.w700,
+                Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
+          if (!BusinessAccess.readOnly)
+            PopupMenuButton<String>(
+              tooltip: 'Item actions',
+              onSelected: (value) => value == 'edit'
+                  ? _editProduct(product)
+                  : _removeCatalogEntry(
+                      context,
+                      'products',
+                      product,
+                      rows.refresh,
+                    ),
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'edit', child: Text('Edit item')),
+                PopupMenuItem(value: 'delete', child: Text('Delete item')),
               ],
             ),
         ],

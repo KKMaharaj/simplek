@@ -425,39 +425,25 @@ EdgeInsets _formPadding(BuildContext context) {
 /// Sales by week for the period on screen: sky bars, the latest week in
 /// orange (Reports.png). Uses the invoices already loaded.
 class _WeeklySalesChart extends StatelessWidget {
-  const _WeeklySalesChart({required this.invoices});
-  final List<Map<String, dynamic>> invoices;
+  const _WeeklySalesChart({required this.weeks});
+
+  /// Four weeks ending on the latest invoice date, oldest first, as
+  /// report_summary returns them: {start, end, sales}.
+  final List<Map<String, dynamic>> weeks;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final dated = [
-      for (final invoice in invoices)
-        if (parseStoredDate(invoice['invoice_date']) case final date?)
-          (date, (invoice['total_amount'] as num?)?.toDouble() ?? 0),
-    ];
-    if (dated.isEmpty) return const SizedBox.shrink();
-    final latest = dated
-        .map((entry) => entry.$1)
-        .reduce((a, b) => a.isAfter(b) ? a : b);
-    final end = DateUtils.dateOnly(latest);
-    // Four weeks ending on the latest invoice date.
-    final weeks = [
-      for (var i = 3; i >= 0; i--)
+    if (weeks.length != 4) return const SizedBox.shrink();
+    final spans = [
+      for (final week in weeks)
         (
-          start: end.subtract(Duration(days: i * 7 + 6)),
-          end: end.subtract(Duration(days: i * 7)),
+          start: parseStoredDate(week['start']) ?? DateTime.now(),
+          end: parseStoredDate(week['end']) ?? DateTime.now(),
         ),
     ];
     final totals = [
-      for (final week in weeks)
-        dated
-            .where(
-              (entry) =>
-                  !DateUtils.dateOnly(entry.$1).isBefore(week.start) &&
-                  !DateUtils.dateOnly(entry.$1).isAfter(week.end),
-            )
-            .fold<double>(0, (sum, entry) => sum + entry.$2),
+      for (final week in weeks) Paise.parse(week['sales']).inRupees,
     ];
     final highest = totals.reduce((a, b) => a > b ? a : b);
     String label(({DateTime start, DateTime end}) week) =>
@@ -510,7 +496,7 @@ class _WeeklySalesChart extends StatelessWidget {
                         FittedBox(
                           fit: BoxFit.scaleDown,
                           child: Text(
-                            label(weeks[i]),
+                            label(spans[i]),
                             maxLines: 1,
                             style: theme.textTheme.bodySmall,
                           ),
