@@ -216,12 +216,23 @@ class _BusinessAddressFieldsState extends State<_BusinessAddressFields> {
   bool _lookupFailed = false;
   String _lastLookedUp = '';
 
+  /// Used when the state has no district list loaded: the district is typed.
+  late final _districtText = TextEditingController(text: widget.draft.district);
+
   _AddressDraft get _draft => widget.draft;
+
+  @override
+  void dispose() {
+    _districtText.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
     super.initState();
-    IndiaDistricts.load().then((_) {
+    IndiaDistricts.load(
+      () => rootBundle.loadString(IndiaDistricts.assetPath),
+    ).then((_) {
       if (mounted) setState(() {});
     });
     _applyLockedState();
@@ -245,7 +256,10 @@ class _BusinessAddressFieldsState extends State<_BusinessAddressFields> {
 
   void _setState(String? state) {
     setState(() {
-      if (state != _draft.state) _draft.district = null;
+      if (state != _draft.state) {
+        _draft.district = null;
+        _districtText.clear();
+      }
       _draft.state = state;
     });
   }
@@ -295,10 +309,14 @@ class _BusinessAddressFieldsState extends State<_BusinessAddressFields> {
           _draft.state = foundState;
         }
         final state = _draft.state;
+        final typed = state != null && IndiaDistricts.of(state).isEmpty;
         final district = state == null
             ? null
+            : typed
+            ? _titleCase(office.district.toLowerCase())
             : IndiaDistricts.match(state, office.district);
         _draft.district = district;
+        _districtText.text = district ?? '';
         _lookupMessage = district == null
             ? 'City and state filled from the PIN code. Choose your district.'
             : 'City, district and state filled from the PIN code. You can change them.';
@@ -428,25 +446,38 @@ class _BusinessAddressFieldsState extends State<_BusinessAddressFields> {
           validator: (value) => value == null ? 'Select the state' : null,
         ),
         gap,
-        SearchablePickerField(
-          label: 'District',
-          required: true,
-          options: districts,
-          value: _draft.district,
-          hint: state == null ? 'Choose the state first' : 'Select district',
-          searchHint: 'Search districts',
-          emptyText: 'No matching districts',
-          onChanged: state == null || districts.isEmpty
-              ? null
-              : (value) {
-                  setState(() => _draft.district = value);
-                },
-          validator: (value) => value == null || value.isEmpty
-              ? (state == null
-                    ? 'Choose the state, then the district'
-                    : 'Select the district')
-              : null,
-        ),
+        if (state != null && districts.isEmpty)
+          _labeledText(
+            _districtText,
+            'District',
+            required: true,
+            textCapitalization: TextCapitalization.words,
+            maxLength: 100,
+            onChanged: (value) =>
+                _draft.district = value.trim().isEmpty ? null : value.trim(),
+            validator: (value) =>
+                value.trim().length < 2 ? 'Enter the district' : null,
+          )
+        else
+          SearchablePickerField(
+            label: 'District',
+            required: true,
+            options: districts,
+            value: _draft.district,
+            hint: state == null ? 'Choose the state first' : 'Select district',
+            searchHint: 'Search districts',
+            emptyText: 'No matching districts',
+            onChanged: state == null || districts.isEmpty
+                ? null
+                : (value) {
+                    setState(() => _draft.district = value);
+                  },
+            validator: (value) => value == null || value.isEmpty
+                ? (state == null
+                      ? 'Choose the state, then the district'
+                      : 'Select the district')
+                : null,
+          ),
       ],
     );
   }

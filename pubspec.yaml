@@ -79,6 +79,7 @@ flutter:
     - assets/branding/upi-logo.png
     - assets/fonts/NotoSans-Regular.ttf
     - assets/fonts/NotoSans-Bold.ttf
+    - assets/data/states_districts.json
 
 flutter_launcher_icons:
   android: "launcher_icon"

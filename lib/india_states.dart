@@ -14,8 +14,6 @@ library;
 
 import 'dart:convert';
 
-import 'package:flutter/services.dart' show rootBundle;
-
 class IndiaState {
   const IndiaState({
     required this.name,
@@ -172,12 +170,15 @@ abstract final class IndiaDistricts {
 
   static bool get isLoaded => _loaded;
 
-  static Future<void> load() async {
+  /// Where the app bundles the list.
+  static const assetPath = 'assets/data/states_districts.json';
+
+  /// Loads the list once. [read] returns the asset's text, e.g.
+  /// `() => rootBundle.loadString(IndiaDistricts.assetPath)`.
+  static Future<void> load(Future<String> Function() read) async {
     if (_loaded) return;
     try {
-      loadFromJson(
-        await rootBundle.loadString('assets/data/states_districts.json'),
-      );
+      loadFromJson(await read());
     } catch (_) {
       // Pickers fall back to typing the district.
       _byGstCode = const {};

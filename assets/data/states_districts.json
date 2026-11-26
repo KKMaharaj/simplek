@@ -1,0 +1,257 @@
+{
+ "source": "States: LGD state list (globalviewstateforcitizen.do, read 2026-11-25). Districts not imported yet: run tool/import_lgd.dart with the LGD district download.",
+ "states": [
+  {
+   "lgd_code": 35,
+   "name": "Andaman and Nicobar Islands",
+   "gst_state_code": "35",
+   "type": "UT",
+   "districts": []
+  },
+  {
+   "lgd_code": 28,
+   "name": "Andhra Pradesh",
+   "gst_state_code": "37",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 12,
+   "name": "Arunachal Pradesh",
+   "gst_state_code": "12",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 18,
+   "name": "Assam",
+   "gst_state_code": "18",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 10,
+   "name": "Bihar",
+   "gst_state_code": "10",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 4,
+   "name": "Chandigarh",
+   "gst_state_code": "04",
+   "type": "UT",
+   "districts": []
+  },
+  {
+   "lgd_code": 22,
+   "name": "Chhattisgarh",
+   "gst_state_code": "22",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 38,
+   "name": "Dadra and Nagar Haveli and Daman and Diu",
+   "gst_state_code": "26",
+   "type": "UT",
+   "districts": []
+  },
+  {
+   "lgd_code": 7,
+   "name": "Delhi",
+   "gst_state_code": "07",
+   "type": "UT",
+   "districts": []
+  },
+  {
+   "lgd_code": 30,
+   "name": "Goa",
+   "gst_state_code": "30",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 24,
+   "name": "Gujarat",
+   "gst_state_code": "24",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 6,
+   "name": "Haryana",
+   "gst_state_code": "06",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 2,
+   "name": "Himachal Pradesh",
+   "gst_state_code": "02",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 1,
+   "name": "Jammu and Kashmir",
+   "gst_state_code": "01",
+   "type": "UT",
+   "districts": []
+  },
+  {
+   "lgd_code": 20,
+   "name": "Jharkhand",
+   "gst_state_code": "20",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 29,
+   "name": "Karnataka",
+   "gst_state_code": "29",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 32,
+   "name": "Kerala",
+   "gst_state_code": "32",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 37,
+   "name": "Ladakh",
+   "gst_state_code": "38",
+   "type": "UT",
+   "districts": []
+  },
+  {
+   "lgd_code": 31,
+   "name": "Lakshadweep",
+   "gst_state_code": "31",
+   "type": "UT",
+   "districts": []
+  },
+  {
+   "lgd_code": 23,
+   "name": "Madhya Pradesh",
+   "gst_state_code": "23",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 27,
+   "name": "Maharashtra",
+   "gst_state_code": "27",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 14,
+   "name": "Manipur",
+   "gst_state_code": "14",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 17,
+   "name": "Meghalaya",
+   "gst_state_code": "17",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 15,
+   "name": "Mizoram",
+   "gst_state_code": "15",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 13,
+   "name": "Nagaland",
+   "gst_state_code": "13",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 21,
+   "name": "Odisha",
+   "gst_state_code": "21",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 34,
+   "name": "Puducherry",
+   "gst_state_code": "34",
+   "type": "UT",
+   "districts": []
+  },
+  {
+   "lgd_code": 3,
+   "name": "Punjab",
+   "gst_state_code": "03",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 8,
+   "name": "Rajasthan",
+   "gst_state_code": "08",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 11,
+   "name": "Sikkim",
+   "gst_state_code": "11",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 33,
+   "name": "Tamil Nadu",
+   "gst_state_code": "33",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 36,
+   "name": "Telangana",
+   "gst_state_code": "36",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 16,
+   "name": "Tripura",
+   "gst_state_code": "16",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 9,
+   "name": "Uttar Pradesh",
+   "gst_state_code": "09",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 5,
+   "name": "Uttarakhand",
+   "gst_state_code": "05",
+   "type": "State",
+   "districts": []
+  },
+  {
+   "lgd_code": 19,
+   "name": "West Bengal",
+   "gst_state_code": "19",
+   "type": "State",
+   "districts": []
+  }
+ ]
+}

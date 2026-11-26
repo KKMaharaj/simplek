@@ -223,9 +223,7 @@ void main() {
       MaterialApp(
         theme: simplekTheme(Brightness.light),
         home: Scaffold(
-          body: SearchableStateField(
-            onChanged: (value) => selected = value,
-          ),
+          body: SearchableStateField(onChanged: (value) => selected = value),
         ),
       ),
     );

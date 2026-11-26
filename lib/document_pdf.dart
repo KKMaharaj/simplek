@@ -155,7 +155,7 @@ Future<Uint8List> buildDocumentPdf(
               defaultTextStyle: pw.TextStyle(
                 fontSize: 9.5,
                 color: _Layout.text,
-                lineSpacing: 1.5,
+                lineSpacing: 0.8,
               ),
             ),
         buildBackground: (context) => pw.FullPage(
@@ -180,7 +180,7 @@ Future<Uint8List> buildDocumentPdf(
         layout.itemsTable(),
         pw.SizedBox(height: _Layout.gap),
         // Boxes 5-7 move to the next page together rather than split.
-        pw.Container(
+        pw.Inseparable(
           child: pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.stretch,
             children: [
@@ -594,7 +594,7 @@ class _Layout {
       verticalAlignment: pw.TableCellVerticalAlignment.middle,
       children: [
         pw.Padding(
-          padding: const pw.EdgeInsets.fromLTRB(10, 5, 8, 5),
+          padding: const pw.EdgeInsets.fromLTRB(10, 3.5, 8, 3.5),
           child: pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
@@ -608,7 +608,7 @@ class _Layout {
           ),
         ),
         pw.Padding(
-          padding: const pw.EdgeInsets.fromLTRB(8, 5, 10, 5),
+          padding: const pw.EdgeInsets.fromLTRB(8, 3.5, 10, 3.5),
           child: pw.Text(value, textAlign: pw.TextAlign.right, style: style),
         ),
       ],
@@ -621,13 +621,12 @@ class _Layout {
     final taxPaise = taxes.fold<int>(0, (sum, line) => sum + line.$2);
     final roundOff = toPaise(data.total) - taxable - taxPaise;
     final rows = <pw.TableRow>[
-      _totalRow(
-        'Subtotal',
-        rupees(taxable / 100),
-        sub: data.gstDocument ? 'excl. GST' : null,
-      ),
+      // On a GST document the taxable value is the subtotal (no discounts),
+      // so it shows once (CR-25 change 10: more rows fit on one page).
       if (data.gstDocument)
-        _totalRow('Taxable value', rupees(taxable / 100), bold: true),
+        _totalRow('Taxable value', rupees(taxable / 100), bold: true)
+      else
+        _totalRow('Subtotal', rupees(taxable / 100)),
       for (final (name, paise) in taxes) _totalRow(name, rupees(paise / 100)),
       if (roundOff != 0) _totalRow('Round off', rupees(roundOff / 100)),
       _totalRow(
@@ -763,7 +762,8 @@ class _Layout {
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
           pw.Text('Description', style: label),
-          pw.Text(description, maxLines: 3),
+          // 9 pt so the full 300 characters fit in three lines; never cut.
+          pw.Text(description, style: const pw.TextStyle(fontSize: 9)),
         ],
       ),
     );

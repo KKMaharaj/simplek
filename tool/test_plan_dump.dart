@@ -10,14 +10,17 @@ void main() {
   );
   for (final name in excel.tables.keys) {
     final sheet = excel.tables[name]!;
-    stdout.writeln('=== $name (${sheet.maxRows} rows x ${sheet.maxColumns} cols)');
+    stdout.writeln(
+      '=== $name (${sheet.maxRows} rows x ${sheet.maxColumns} cols)',
+    );
     for (var r = 0; r < sheet.maxRows; r++) {
       final row = sheet.row(r);
       final cells = [for (final c in row) c?.value?.toString() ?? ''];
       final id = cells.isEmpty ? '' : cells.first;
-      if (r < 3 ||
-          RegExp(r'^(ONB|NAV-008|INV|DOC)').hasMatch(id)) {
-        stdout.writeln('$r | ${cells.map((c) => c.replaceAll('\n', ' / ')).join(' | ')}');
+      if (r < 3 || RegExp(r'^(ONB|NAV-008|INV|DOC)').hasMatch(id)) {
+        stdout.writeln(
+          '$r | ${cells.map((c) => c.replaceAll('\n', ' / ')).join(' | ')}',
+        );
       }
     }
   }

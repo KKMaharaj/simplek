@@ -33,7 +33,7 @@ begin
   if has_function_privilege('anon', 'public.record_invoice_payment(uuid,numeric,text,date,text,text,uuid)', 'execute') then
     raise exception 'anon can record payments';
   end if;
-  if has_function_privilege('anon', 'public.save_invoice(uuid,jsonb,jsonb,boolean,text)', 'execute') then
+  if has_function_privilege('anon', 'public.save_invoice(uuid,jsonb,jsonb,boolean,text,text)', 'execute') then
     raise exception 'anon can save invoices';
   end if;
   if to_regprocedure('public.record_invoice_payment(uuid,numeric,text,date,text,text)') is not null then

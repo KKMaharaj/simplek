@@ -1,12 +1,13 @@
-// Tests for the 25 Nov 2026 change request (docs/CHANGE_REQUEST_2026-11-25.md).
-import 'dart:typed_data';
+import 'dart:io';
 
+// Tests for the 25 Nov 2026 change request (docs/CHANGE_REQUEST_2026-11-25.md).
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:simplek/document_pdf.dart';
 import 'package:simplek/main.dart';
+import 'package:simplek/modern_ui.dart';
 import 'package:simplek/money.dart';
 
 TextEditingValue _type(List<TextInputFormatter> formatters, String text) {
@@ -20,8 +21,18 @@ TextEditingValue _type(List<TextInputFormatter> formatters, String text) {
   return value;
 }
 
+/// True once tool/import_lgd.dart has filled the district lists.
+final _districtsImported = File(
+  'assets/data/states_districts.json',
+).readAsStringSync().contains(RegExp(r'"districts": \[\s*\{'));
+
 /// A GSTIN with a correct check digit for the given first 14 characters.
 String _gstin(String first14) => first14 + gstinCheckCharacter(first14);
+
+/// A field label (FieldLabel), whatever its * or "(optional)".
+Finder _label(String text) => find.byWidgetPredicate(
+  (widget) => widget is FieldLabel && widget.text == text,
+);
 
 Widget _app(Widget child) => MaterialApp(
   theme: simplekTheme(Brightness.light),
@@ -33,13 +44,25 @@ void main() {
 
   group('change 2: code fields in capitals', () {
     test('PAN is upper case, letters and digits only, 10 characters', () {
-      expect(_type(upperCaseCodeFormatters(10), 'abcde1234f').text, 'ABCDE1234F');
-      expect(_type(upperCaseCodeFormatters(10), 'abcde1234fgh').text, 'ABCDE1234F');
-      expect(_type(upperCaseCodeFormatters(10), 'ab cd-e1234f').text, 'ABCDE1234F');
+      expect(
+        _type(upperCaseCodeFormatters(10), 'abcde1234f').text,
+        'ABCDE1234F',
+      );
+      expect(
+        _type(upperCaseCodeFormatters(10), 'abcde1234fgh').text,
+        'ABCDE1234F',
+      );
+      expect(
+        _type(upperCaseCodeFormatters(10), 'ab cd-e1234f').text,
+        'ABCDE1234F',
+      );
     });
 
     test('IFSC stops at 11 and GSTIN at 15 characters', () {
-      expect(_type(upperCaseCodeFormatters(11), 'hdfc00008391').text, 'HDFC0000839');
+      expect(
+        _type(upperCaseCodeFormatters(11), 'hdfc00008391').text,
+        'HDFC0000839',
+      );
       expect(
         _type(upperCaseCodeFormatters(15), '29abcde1234f1z5xx').text,
         '29ABCDE1234F1Z5',
@@ -86,8 +109,10 @@ void main() {
       expect(stateFromGstin('32ABCDE1234F1Z5')?.name, 'Kerala');
       expect(stateFromGstin('37ABCDE1234F1Z5')?.name, 'Andhra Pradesh');
       expect(stateFromGstin('38ABCDE1234F1Z5')?.name, 'Ladakh');
-      expect(stateFromGstin('25ABCDE1234F1Z5')?.name,
-          'Dadra and Nagar Haveli and Daman and Diu');
+      expect(
+        stateFromGstin('25ABCDE1234F1Z5')?.name,
+        'Dadra and Nagar Haveli and Daman and Diu',
+      );
       expect(stateFromGstin('99ABCDE1234F1Z5'), isNull);
       expect(stateWithCode('Kerala'), 'Kerala (32)');
     });
@@ -284,7 +309,7 @@ void main() {
     ) async {
       BusinessSettings.isGstRegistered.value = false;
       await openForm(tester);
-      expect(find.text('Customer name'), findsOneWidget);
+      expect(_label('Customer name'), findsOneWidget);
       for (final label in [
         'Is the customer registered for GST?',
         'GSTIN',
@@ -292,6 +317,7 @@ void main() {
         'Verify',
       ]) {
         expect(find.text(label), findsNothing, reason: label);
+        expect(_label(label), findsNothing, reason: label);
       }
       expect(find.textContaining('GST'), findsNothing);
       expect(tester.takeException(), isNull);
@@ -302,16 +328,16 @@ void main() {
     ) async {
       BusinessSettings.isGstRegistered.value = true;
       await openForm(tester);
-      expect(find.text('Is the customer registered for GST?'), findsOneWidget);
-      expect(find.text('Customer name'), findsOneWidget);
-      expect(find.text('Mobile'), findsOneWidget);
-      expect(find.text('GSTIN'), findsNothing);
-      expect(find.text('State'), findsNothing);
+      expect(_label('Is the customer registered for GST?'), findsOneWidget);
+      expect(_label('Customer name'), findsOneWidget);
+      expect(_label('Mobile'), findsOneWidget);
+      expect(_label('GSTIN'), findsNothing);
+      expect(_label('State'), findsNothing);
       await tester.tap(find.text('Yes'));
       await tester.pumpAndSettle();
-      expect(find.text('GSTIN'), findsOneWidget);
+      expect(_label('GSTIN'), findsOneWidget);
       expect(find.text('Verify'), findsOneWidget);
-      expect(find.text('State'), findsNothing);
+      expect(_label('State'), findsNothing);
     });
 
     testWidgets('the dialog scrolls; buttons stay below at 360x640', (
@@ -340,34 +366,41 @@ void main() {
 
     for (final quotation in [false, true]) {
       final name = quotation ? 'quotation' : 'invoice';
-      testWidgets('not registered: no GST, GSTIN, HSN or place of supply on a new $name', (
-        tester,
-      ) async {
-        BusinessSettings.isGstRegistered.value = false;
-        await tester.pumpWidget(
-          MaterialApp(
-            theme: simplekTheme(Brightness.light),
-            home: quotation
-                ? const QuotationBuilderPage()
-                : const InvoiceBuilderPage(),
-          ),
-        );
-        await tester.pumpAndSettle();
-        for (final label in [
-          'Place of supply',
-          'Customer GSTIN',
-          'GST rate (%)',
-          'CGST',
-          'SGST',
-          'IGST',
-          'HSN',
-          'TAX INVOICE',
-        ]) {
-          expect(find.text(label), findsNothing, reason: label);
-        }
-        expect(find.text('Description'), findsOneWidget);
-        expect(tester.takeException(), isNull);
-      });
+      testWidgets(
+        'not registered: no GST, GSTIN, HSN or place of supply on a new $name',
+        (tester) async {
+          BusinessSettings.isGstRegistered.value = false;
+          await tester.pumpWidget(
+            MaterialApp(
+              theme: simplekTheme(Brightness.light),
+              home: quotation
+                  ? const QuotationBuilderPage()
+                  : const InvoiceBuilderPage(),
+            ),
+          );
+          await tester.pumpAndSettle();
+          for (final label in [
+            'Place of supply',
+            'Customer GSTIN',
+            'GST rate (%)',
+            'CGST',
+            'SGST',
+            'IGST',
+            'HSN',
+            'TAX INVOICE',
+          ]) {
+            expect(find.text(label), findsNothing, reason: label);
+            expect(_label(label), findsNothing, reason: label);
+          }
+          await tester.scrollUntilVisible(
+            _label('Description'),
+            300,
+            scrollable: find.byType(Scrollable).first,
+          );
+          expect(_label('Description'), findsOneWidget);
+          expect(tester.takeException(), isNull);
+        },
+      );
 
       testWidgets('registered: place of supply on a new $name', (tester) async {
         BusinessSettings.isGstRegistered.value = true;
@@ -380,7 +413,7 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.text('Place of supply'), findsOneWidget);
+        expect(_label('Place of supply'), findsOneWidget);
         expect(find.text('Karnataka'), findsOneWidget);
         expect(tester.takeException(), isNull);
       });
@@ -449,17 +482,25 @@ void main() {
       r'/Type\s*/Page[^s]',
     ).allMatches(String.fromCharCodes(pdf)).length;
 
-    final description = ('Digital signature, valid 2 years, for Mr. Ravi Kumar. ' * 6)
-        .substring(0, 300);
+    final description =
+        ('Digital signature, valid 2 years, for Mr. Ravi Kumar. ' * 6)
+            .substring(0, 300);
 
-    test('8 items, CGST/SGST, bank + UPI and 300 characters fit one page', () async {
-      expect(description.length, 300);
-      final pdf = await buildDocumentPdf(
-        invoice(8, description: description),
-        profile,
-      );
-      expect(pages(pdf), 1);
-    });
+    test(
+      '8 items, CGST/SGST, bank + UPI and 300 characters fit one page',
+      () async {
+        expect(description.length, 300);
+        final pdf = await buildDocumentPdf(
+          invoice(8, description: description),
+          profile,
+        );
+        if (Platform.environment['SIMPLEK_PDF_QA'] == '1') {
+          await Directory('tmp/pdfs-new').create(recursive: true);
+          await File('tmp/pdfs-new/cr25-8-items.pdf').writeAsBytes(pdf);
+        }
+        expect(pages(pdf), 1);
+      },
+    );
 
     test('12 items run onto two pages', () async {
       final pdf = await buildDocumentPdf(
@@ -497,15 +538,31 @@ void main() {
       );
     });
 
-    test('states and districts load from the bundled asset', () async {
-      await IndiaDistricts.load();
+    test('states load from the bundled asset', () async {
+      await IndiaDistricts.load(
+        () => rootBundle.loadString(IndiaDistricts.assetPath),
+      );
       expect(indiaStates, hasLength(36));
       expect(
         indiaStates.where((state) => state.isUnionTerritory),
         hasLength(8),
       );
-      expect(IndiaDistricts.of('Karnataka'), contains('Shivamogga'));
-      expect(IndiaDistricts.of('Kerala'), isNot(contains('Shivamogga')));
+      expect(IndiaDistricts.isLoaded, isTrue);
     });
+
+    test(
+      'districts follow the chosen state',
+      () async {
+        await IndiaDistricts.load(
+          () => rootBundle.loadString(IndiaDistricts.assetPath),
+        );
+        expect(IndiaDistricts.of('Karnataka'), contains('Shivamogga'));
+        expect(IndiaDistricts.of('Kerala'), isNot(contains('Shivamogga')));
+        expect(IndiaDistricts.match('Karnataka', 'SHIVAMOGGA'), 'Shivamogga');
+      },
+      skip: _districtsImported
+          ? false
+          : 'LGD district list not imported yet (tool/import_lgd.dart)',
+    );
   });
 }

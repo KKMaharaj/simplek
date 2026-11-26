@@ -77,15 +77,48 @@ String tidy(String value) => value
       if (['and', 'of', 'the'].contains(lower)) return lower;
       return lower
           .split('-')
-          .map((part) => part.isEmpty ? part : part[0].toUpperCase() + part.substring(1))
+          .map(
+            (part) =>
+                part.isEmpty ? part : part[0].toUpperCase() + part.substring(1),
+          )
           .join('-');
     })
     .join(' ')
     .replaceFirstMapped(RegExp('^([a-z])'), (m) => m[1]!.toUpperCase());
 
+/// Before the LGD district file is available: the 36 states with empty
+/// district lists, so the app falls back to a typed district.
+void writeStatesOnly() {
+  Directory('assets/data').createSync(recursive: true);
+  File('assets/data/states_districts.json').writeAsStringSync(
+    const JsonEncoder.withIndent(' ').convert({
+      'source':
+          'States: LGD state list (globalviewstateforcitizen.do, read 2026-11-25). '
+          'Districts not imported yet: run tool/import_lgd.dart with the LGD district download.',
+      'states': [
+        for (final state in indiaStates)
+          {
+            'lgd_code': state.lgdCode,
+            'name': state.name,
+            'gst_state_code': state.gstCode,
+            'type': state.isUnionTerritory ? 'UT' : 'State',
+            'districts': <Object>[],
+          },
+      ],
+    }),
+  );
+  stdout.writeln('Wrote ${indiaStates.length} states with no districts.');
+}
+
 void main(List<String> args) {
+  if (args.length == 1 && args.first == '--states-only') {
+    writeStatesOnly();
+    return;
+  }
   if (args.length != 2) {
-    stderr.writeln('Usage: dart run tool/import_lgd.dart <districts.csv> <YYYY-MM-DD>');
+    stderr.writeln(
+      'Usage: dart run tool/import_lgd.dart <districts.csv> <YYYY-MM-DD>',
+    );
     exit(64);
   }
   final downloaded = args[1];
