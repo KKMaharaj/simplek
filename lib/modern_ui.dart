@@ -3,10 +3,12 @@ import 'package:flutter/material.dart';
 import 'app_theme.dart';
 import 'form_fields.dart';
 import 'india_states.dart';
+import 'ui_kit.dart';
 
 export 'app_theme.dart';
 export 'form_fields.dart';
 export 'india_states.dart';
+export 'ui_kit.dart';
 
 /// Which section of the app shell is showing.
 class DesignSettings {
@@ -52,13 +54,15 @@ class EditableTerms extends StatelessWidget {
       subtitle: const Text('Prefilled from Settings • Tap to edit'),
       childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       children: [
-        TextField(
-          controller: controller,
-          minLines: 3,
-          maxLines: 8,
-          decoration: const InputDecoration(
-            labelText: 'Document terms',
-            helperText: 'Edits apply to this document only.',
+        LabeledField(
+          label: 'Document terms',
+          child: TextField(
+            controller: controller,
+            minLines: 3,
+            maxLines: 8,
+            decoration: const InputDecoration(
+              helperText: 'Edits apply to this document only.',
+            ),
           ),
         ),
       ],
@@ -194,33 +198,7 @@ class InvoiceStatusBadge extends StatelessWidget {
   const InvoiceStatusBadge(this.status, {super.key});
   final String status;
   @override
-  Widget build(BuildContext context) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    final color = switch (status.toLowerCase()) {
-      'paid' => Color(dark ? 0xFF34D399 : 0xFF047857),
-      'partial' => Color(dark ? 0xFF8EA2FF : 0xFF2A3FD6),
-      'draft' || 'cancelled' => Color(dark ? 0xFF9AA3C0 : 0xFF667091),
-      'overdue' => Color(dark ? 0xFFF87171 : 0xFFB91C1C),
-      _ => Color(dark ? 0xFFFBBF24 : 0xFF92400E),
-    };
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        status.isEmpty
-            ? ''
-            : status[0].toUpperCase() + status.substring(1).toLowerCase(),
-        style: TextStyle(
-          color: color,
-          fontSize: 11.5,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => StatusChip(status);
 }
 
 /// A field that opens a searchable list (states, districts). The label sits
@@ -424,7 +402,8 @@ class SearchableStateField extends StatelessWidget {
   );
 }
 
-/// The home screen: money owed up front, then shortcuts and recent invoices.
+/// The home screen (docs/design/Home.png and WebHome.png): money owed up
+/// front on a navy card, four quick actions, then recent invoices.
 class ModernOverview extends StatelessWidget {
   const ModernOverview({
     super.key,
@@ -445,6 +424,12 @@ class ModernOverview extends StatelessWidget {
     required this.onInvoices,
     required this.onRefresh,
     this.onOpenInvoice,
+    this.onPayment,
+    this.onSearch,
+    this.onReports,
+    this.unpaidCount,
+    this.collected,
+    this.partlyPaidCount,
   });
   final String sales, outstanding, invoiceCount, customerCount, businessName;
   final String? productCount;
@@ -464,6 +449,14 @@ class ModernOverview extends StatelessWidget {
   /// Opens one recent invoice by id. Falls back to the list when null.
   final void Function(String id)? onOpenInvoice;
 
+  /// Record payment. When null the fourth tile adds a product instead.
+  final VoidCallback? onPayment;
+  final VoidCallback? onSearch;
+  final VoidCallback? onReports;
+  final int? unpaidCount;
+  final String? collected;
+  final int? partlyPaidCount;
+
   static String _greeting() {
     final hour = DateTime.now().hour;
     return hour < 12
@@ -473,485 +466,583 @@ class ModernOverview extends StatelessWidget {
         : 'Good evening';
   }
 
-  @override
-  Widget build(BuildContext context) {
+  bool get _blank => loading && recent.isEmpty;
+  String _figure(String value) => _blank ? '—' : value;
+
+  List<(IconData, String, TileTone, VoidCallback)> get _actions => [
+    (Icons.receipt_long_outlined, 'Invoice', TileTone.orange, onNewInvoice),
+    (Icons.description_outlined, 'Quotation', TileTone.sky, onNewQuotation),
+    (Icons.people_alt_outlined, 'Customer', TileTone.navy, onCustomer),
+    onPayment != null
+        ? (
+            Icons.account_balance_wallet_outlined,
+            'Payment',
+            TileTone.orange,
+            onPayment!,
+          )
+        : (Icons.inventory_2_outlined, 'Item', TileTone.orange, onProduct),
+  ];
+
+  Widget _header(BuildContext context, {bool wide = false}) {
     final theme = Theme.of(context);
-    final muted = theme.colorScheme.onSurfaceVariant;
-    final blank = loading && recent.isEmpty;
-    return RefreshIndicator(
-      onRefresh: onRefresh,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 104),
-        children: [
-          Text(_greeting(), style: TextStyle(color: muted, fontSize: 14)),
-          const SizedBox(height: 2),
-          Text(
-            businessName.isEmpty ? 'Your business today' : businessName,
-            style: theme.textTheme.headlineSmall,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(_greeting(), style: theme.textTheme.bodySmall),
+              const SizedBox(height: 2),
+              Text(
+                businessName.isEmpty ? 'Your business today' : businessName,
+                style: wide
+                    ? theme.textTheme.headlineMedium
+                    : theme.textTheme.headlineSmall,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
           ),
-          const SizedBox(height: 16),
-          if (error != null) ...[
-            Card(
-              child: ListTile(
-                leading: const TintedIcon(
-                  Icons.cloud_off_outlined,
-                  color: SimplekColors.warning,
+        ),
+        if (wide && onSearch != null) ...[
+          const SizedBox(width: 16),
+          SizedBox(
+            width: 320,
+            child: Pressable(
+              onTap: onSearch,
+              borderRadius: BorderRadius.circular(12),
+              color: theme.colorScheme.surface,
+              child: Container(
+                height: 48,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: theme.colorScheme.outlineVariant),
                 ),
-                title: const Text('Could not refresh'),
-                subtitle: const Text('Totals below may be out of date.'),
-                trailing: TextButton(
-                  onPressed: onRefresh,
-                  child: const Text('Retry'),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.search,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 10),
+                    Text('Search everything', style: theme.textTheme.bodySmall),
+                  ],
                 ),
               ),
             ),
-            const SizedBox(height: 12),
-          ],
-          _HeroCard(
-            outstanding: blank ? '—' : outstanding,
-            sales: blank ? '—' : sales,
-            invoiceCount: blank ? '—' : invoiceCount,
-            loading: loading,
-            onNewInvoice: readOnly ? null : onNewInvoice,
           ),
+          if (!readOnly) ...[
+            const SizedBox(width: 12),
+            FilledButton.icon(
+              onPressed: onNewInvoice,
+              icon: const Icon(Icons.add),
+              label: const Text('New invoice'),
+            ),
+          ],
+        ] else ...[
+          if (onSearch != null) ...[
+            const SizedBox(width: 8),
+            SquareIconButton(
+              icon: Icons.search,
+              tooltip: 'Search everything',
+              onPressed: onSearch,
+            ),
+          ],
+          const SizedBox(width: 8),
+          SquareIconButton(
+            icon: Icons.refresh,
+            tooltip: 'Refresh',
+            onPressed: loading ? null : onRefresh,
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _errorCard() => Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: SectionCard(
+      padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
+      child: Row(
+        children: [
+          const IconTile(Icons.cloud_off_outlined, size: 40),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Text(
+              'Could not refresh. Totals may be out of date.',
+              maxLines: 2,
+            ),
+          ),
+          TextButton(onPressed: onRefresh, child: const Text('Retry')),
+        ],
+      ),
+    ),
+  );
+
+  Widget _recentRows(BuildContext context) {
+    if (recent.isEmpty && loading) return const SkeletonRows(count: 3);
+    if (recent.isEmpty) {
+      return EmptyState(
+        icon: Icons.receipt_long_outlined,
+        message: error == null
+            ? 'No invoices yet. Create your first invoice.'
+            : 'Invoices are unavailable right now.',
+        actionLabel: readOnly ? null : 'Create invoice',
+        onAction: readOnly ? null : onNewInvoice,
+      );
+    }
+    return RowGroup(
+      children: [
+        for (final row in recent)
+          ListRowTile(
+            leading: InitialTile(row['customer'] ?? ''),
+            title: (row['customer'] ?? '').isEmpty
+                ? 'Customer'
+                : row['customer']!,
+            subtitle: [
+              row['number'] ?? '',
+              row['date'] ?? '',
+            ].where((part) => part.isNotEmpty).join(' · '),
+            trailingTop: Text(
+              row['amount'] ?? '',
+              maxLines: 1,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                fontVariations: const [FontVariation('wght', 700)],
+              ),
+            ),
+            trailingBottom: StatusChip(row['status'] ?? 'draft'),
+            onTap: onOpenInvoice != null && (row['id'] ?? '').isNotEmpty
+                ? () => onOpenInvoice!(row['id']!)
+                : onInvoices,
+          ),
+      ],
+    );
+  }
+
+  Widget _recentHeading(BuildContext context) => Row(
+    children: [
+      Expanded(
+        child: Text(
+          'Recent invoices',
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+      ),
+      TextButton(onPressed: onInvoices, child: const Text('View all')),
+    ],
+  );
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) => constraints.maxWidth >= 900
+        ? _wide(context)
+        : _phone(context, constraints.maxWidth),
+  );
+
+  Widget _phone(BuildContext context, double width) => RefreshIndicator(
+    onRefresh: onRefresh,
+    child: ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 104),
+      children: [
+        _header(context),
+        const SizedBox(height: 14),
+        if (error != null) _errorCard(),
+        _MoneyCard(
+          outstanding: _figure(outstanding),
+          unpaidCount: unpaidCount,
+          sales: _figure(sales),
+          invoiceCount: _figure(invoiceCount),
+          loading: loading,
+          onNewInvoice: readOnly ? null : onNewInvoice,
+        ),
+        if (!readOnly) ...[
           const SizedBox(height: 14),
           Row(
             children: [
-              Expanded(
-                child: _StatTile(
-                  icon: Icons.people_alt_outlined,
-                  color: SimplekColors.violet,
-                  label: 'Customers',
-                  value: blank ? '—' : customerCount,
-                ),
-              ),
-              if (productCount != null) ...[
-                const SizedBox(width: 12),
+              for (final (index, action) in _actions.indexed) ...[
+                if (index > 0) const SizedBox(width: 8),
                 Expanded(
-                  child: _StatTile(
-                    icon: Icons.inventory_2_outlined,
-                    color: SimplekColors.success,
-                    label: 'Items',
-                    value: blank ? '—' : productCount!,
+                  child: _ActionTile(
+                    icon: action.$1,
+                    label: action.$2,
+                    tone: action.$3,
+                    onTap: action.$4,
                   ),
                 ),
               ],
             ],
           ),
-          const SizedBox(height: 26),
-          if (!readOnly) ...[
-            Text('Quick actions', style: theme.textTheme.titleLarge),
-            const SizedBox(height: 12),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final columns = constraints.maxWidth >= 560 ? 4 : 2;
-                final width =
-                    (constraints.maxWidth - (columns - 1) * 12) / columns;
-                return Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: [
-                    for (final action in [
-                      (
-                        Icons.receipt_long_outlined,
-                        'Invoice',
-                        SimplekColors.brand,
-                        onNewInvoice,
-                      ),
-                      (
-                        Icons.description_outlined,
-                        'Quotation',
-                        SimplekColors.violet,
-                        onNewQuotation,
-                      ),
-                      (
-                        Icons.person_add_alt_outlined,
-                        'Customer',
-                        SimplekColors.warning,
-                        onCustomer,
-                      ),
-                      (
-                        Icons.add_box_outlined,
-                        'Product / Service',
-                        SimplekColors.success,
-                        onProduct,
-                      ),
-                    ])
-                      SizedBox(
-                        width: width,
-                        child: _ActionTile(
-                          icon: action.$1,
-                          label: action.$2,
-                          color: action.$3,
-                          onTap: action.$4,
-                        ),
-                      ),
-                  ],
-                );
-              },
-            ),
-            const SizedBox(height: 26),
-          ],
+        ],
+        const SizedBox(height: 18),
+        _recentHeading(context),
+        const SizedBox(height: 6),
+        _recentRows(context),
+      ],
+    ),
+  );
+
+  Widget _wide(BuildContext context) {
+    final theme = Theme.of(context);
+    return RefreshIndicator(
+      onRefresh: onRefresh,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(32, 28, 32, 40),
+        children: [
+          _header(context, wide: true),
+          const SizedBox(height: 22),
+          if (error != null) _errorCard(),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: Text(
-                  'Recent invoices',
-                  style: theme.textTheme.titleLarge,
+                child: _MoneyCard(
+                  outstanding: _figure(outstanding),
+                  unpaidCount: unpaidCount,
+                  loading: loading,
+                  compact: true,
                 ),
               ),
-              TextButton(onPressed: onInvoices, child: const Text('View all')),
+              const SizedBox(width: 14),
+              Expanded(
+                child: _WideStat(
+                  label: 'Total sales',
+                  value: _figure(sales),
+                  note: '$invoiceCount invoices',
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: _WideStat(
+                  label: 'Collected',
+                  value: _figure(collected ?? '—'),
+                  tone: TileTone.sky,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: _WideStat(
+                  label: 'Invoices',
+                  value: _figure(invoiceCount),
+                  note: partlyPaidCount == null
+                      ? null
+                      : '$partlyPaidCount partly paid',
+                  tone: TileTone.orange,
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 6),
-          if (recent.isEmpty && !loading)
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
+          const SizedBox(height: 18),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                flex: 3,
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const TintedIcon(Icons.receipt_long_outlined, size: 56),
-                    const SizedBox(height: 14),
-                    Text(
-                      error == null
-                          ? 'Ready for your first invoice?'
-                          : 'Invoices are unavailable',
-                      style: theme.textTheme.titleMedium,
-                      textAlign: TextAlign.center,
-                    ),
+                    _recentHeading(context),
                     const SizedBox(height: 6),
-                    Text(
-                      'It takes under a minute, and you can share it right away.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: muted),
-                    ),
-                    if (!readOnly) ...[
-                      const SizedBox(height: 16),
-                      FilledButton(
-                        onPressed: onNewInvoice,
-                        child: const Text('Create invoice'),
-                      ),
-                    ],
+                    _recentRows(context),
                   ],
                 ),
               ),
-            ),
-          if (recent.isNotEmpty)
-            Card(
-              clipBehavior: Clip.antiAlias,
-              child: Column(
-                children: [
-                  for (final (index, row) in recent.indexed) ...[
-                    if (index > 0) const Divider(indent: 72),
-                    _RecentInvoiceRow(
-                      row: row,
-                      onTap:
-                          onOpenInvoice != null && (row['id'] ?? '').isNotEmpty
-                          ? () => onOpenInvoice!(row['id']!)
-                          : onInvoices,
-                    ),
-                  ],
-                ],
-              ),
-            ),
+              if (!readOnly) ...[
+                const SizedBox(width: 18),
+                SizedBox(
+                  width: 300,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: Text(
+                          'Quick actions',
+                          style: theme.textTheme.titleLarge,
+                        ),
+                      ),
+                      RowGroup(
+                        children: [
+                          ListRowTile(
+                            leading: const IconTile(
+                              Icons.description_outlined,
+                              tone: TileTone.sky,
+                              size: 40,
+                            ),
+                            title: 'New quotation',
+                            subtitle: 'Send prices first',
+                            showChevron: true,
+                            onTap: onNewQuotation,
+                          ),
+                          if (onPayment != null)
+                            ListRowTile(
+                              leading: const IconTile(
+                                Icons.account_balance_wallet_outlined,
+                                size: 40,
+                              ),
+                              title: 'Record payment',
+                              subtitle: 'Mark money received',
+                              showChevron: true,
+                              onTap: onPayment,
+                            ),
+                          ListRowTile(
+                            leading: const IconTile(
+                              Icons.people_alt_outlined,
+                              tone: TileTone.navy,
+                              size: 40,
+                            ),
+                            title: 'Add customer',
+                            subtitle: 'Name, mobile, GSTIN',
+                            showChevron: true,
+                            onTap: onCustomer,
+                          ),
+                          if (onReports != null)
+                            ListRowTile(
+                              leading: const IconTile(
+                                Icons.download_outlined,
+                                tone: TileTone.sky,
+                                size: 40,
+                              ),
+                              title: 'Export for accountant',
+                              subtitle: 'Reports, Tally, Excel',
+                              showChevron: true,
+                              onTap: onReports,
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
         ],
       ),
     );
   }
 }
 
-class _HeroCard extends StatelessWidget {
-  const _HeroCard({
+/// The navy "To collect" card.
+class _MoneyCard extends StatelessWidget {
+  const _MoneyCard({
     required this.outstanding,
-    required this.sales,
-    required this.invoiceCount,
     required this.loading,
-    required this.onNewInvoice,
+    this.unpaidCount,
+    this.sales,
+    this.invoiceCount,
+    this.onNewInvoice,
+    this.compact = false,
   });
-  final String outstanding, sales, invoiceCount;
+  final String outstanding;
   final bool loading;
+  final int? unpaidCount;
+  final String? sales;
+  final String? invoiceCount;
   final VoidCallback? onNewInvoice;
+
+  /// Web: the figure only, as one of four stat cards.
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
-    const soft = Color(0xCCFFFFFF);
-    return Container(
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    Widget tile(String label, String value) => Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
-        gradient: SimplekColors.heroGradient,
-        borderRadius: BorderRadius.circular(26),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x553B5BFD),
-            blurRadius: 24,
-            offset: Offset(0, 12),
+        color: SimplekColors.navy2,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: inter(13, FontWeight.w500, const Color(0xCCFFFFFF)),
+          ),
+          const SizedBox(height: 2),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(value, style: inter(18, FontWeight.w700, Colors.white)),
           ),
         ],
       ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
+    );
+    return Container(
+      padding: EdgeInsets.all(compact ? 18 : 20),
+      decoration: BoxDecoration(
+        color: dark ? SimplekColors.navyDeep : SimplekColors.navy,
+        borderRadius: BorderRadius.circular(compact ? 16 : 22),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Positioned(
-            right: -40,
-            top: -50,
-            child: _Glow(size: 170, alpha: 0.12),
+          Text(
+            'To collect',
+            style: inter(14, FontWeight.w600, const Color(0xCCFFFFFF)),
           ),
-          const Positioned(
-            right: 40,
-            bottom: -70,
-            child: _Glow(size: 150, alpha: 0.08),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(22),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'To collect',
-                  style: TextStyle(color: soft, fontSize: 14),
-                ),
-                const SizedBox(height: 4),
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    outstanding,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 36,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -1,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                if (loading)
-                  const Padding(
-                    padding: EdgeInsets.only(bottom: 12),
-                    child: LinearProgressIndicator(
-                      minHeight: 3,
-                      color: Colors.white,
-                      backgroundColor: Color(0x33FFFFFF),
-                    ),
-                  ),
-                Wrap(
-                  spacing: 24,
-                  runSpacing: 12,
-                  crossAxisAlignment: WrapCrossAlignment.end,
-                  children: [
-                    _HeroFigure(label: 'Total sales', value: sales),
-                    _HeroFigure(label: 'Invoices', value: invoiceCount),
-                  ],
-                ),
-                if (onNewInvoice != null) const SizedBox(height: 18),
-                if (onNewInvoice != null)
-                  FilledButton.icon(
-                    onPressed: onNewInvoice,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: SimplekColors.brandDeep,
-                      minimumSize: const Size(48, 48),
-                    ),
-                    icon: const Icon(Icons.add, size: 20),
-                    label: const Text('New invoice'),
-                  ),
-              ],
+          const SizedBox(height: 4),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              outstanding,
+              style: inter(
+                compact ? 28 : 36,
+                FontWeight.w700,
+                Colors.white,
+              ).copyWith(letterSpacing: -0.8),
             ),
           ),
+          if (unpaidCount != null)
+            Text(
+              'from $unpaidCount unpaid invoice${unpaidCount == 1 ? '' : 's'}',
+              style: inter(13.5, FontWeight.w500, SimplekColors.sky),
+            ),
+          if (loading)
+            const Padding(
+              padding: EdgeInsets.only(top: 10),
+              child: LinearProgressIndicator(
+                minHeight: 3,
+                color: SimplekColors.sky,
+                backgroundColor: Color(0x33FFFFFF),
+              ),
+            ),
+          if (!compact && sales != null && invoiceCount != null) ...[
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(child: tile('Total sales', sales!)),
+                const SizedBox(width: 10),
+                Expanded(child: tile('Invoices', invoiceCount!)),
+              ],
+            ),
+          ],
+          if (!compact && onNewInvoice != null) ...[
+            const SizedBox(height: 14),
+            FilledButton.icon(
+              onPressed: onNewInvoice,
+              icon: const Icon(Icons.add),
+              label: const Text('New invoice'),
+            ),
+          ],
         ],
       ),
     );
   }
 }
 
-class _Glow extends StatelessWidget {
-  const _Glow({required this.size, required this.alpha});
-  final double size, alpha;
-  @override
-  Widget build(BuildContext context) => Container(
-    width: size,
-    height: size,
-    decoration: BoxDecoration(
-      shape: BoxShape.circle,
-      color: Colors.white.withValues(alpha: alpha),
-    ),
-  );
-}
-
-class _HeroFigure extends StatelessWidget {
-  const _HeroFigure({required this.label, required this.value});
-  final String label, value;
-  @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Text(
-        label,
-        style: const TextStyle(color: Color(0xCCFFFFFF), fontSize: 12.5),
-      ),
-      const SizedBox(height: 2),
-      Text(
-        value,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 17,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-    ],
-  );
-}
-
-class _StatTile extends StatelessWidget {
-  const _StatTile({
-    required this.icon,
-    required this.color,
+class _WideStat extends StatelessWidget {
+  const _WideStat({
     required this.label,
     required this.value,
+    this.note,
+    this.tone,
   });
-  final IconData icon;
-  final Color color;
   final String label, value;
+  final String? note;
+  final TileTone? tone;
+
   @override
-  Widget build(BuildContext context) => Card(
-    child: Padding(
-      padding: const EdgeInsets.all(14),
-      child: Row(
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = tone == null
+        ? null
+        : toneColors(tone!, theme.brightness == Brightness.dark);
+    return Container(
+      constraints: const BoxConstraints(minHeight: 118),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: colors?.background ?? theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: colors == null
+              ? theme.colorScheme.outlineVariant
+              : colors.foreground.withValues(alpha: 0.15),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          TintedIcon(icon, color: color, size: 42),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  value,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
+          Text(
+            label,
+            style: inter(
+              14,
+              FontWeight.w600,
+              colors?.foreground ?? theme.colorScheme.onSurface,
             ),
           ),
+          const SizedBox(height: 6),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              style: inter(28, FontWeight.w700, theme.colorScheme.onSurface),
+            ),
+          ),
+          if (note != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              note!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: inter(
+                13,
+                FontWeight.w500,
+                colors?.foreground ?? theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
         ],
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _ActionTile extends StatelessWidget {
   const _ActionTile({
     required this.icon,
     required this.label,
-    required this.color,
+    required this.tone,
     required this.onTap,
   });
   final IconData icon;
   final String label;
-  final Color color;
+  final TileTone tone;
   final VoidCallback onTap;
-  @override
-  Widget build(BuildContext context) => Card(
-    clipBehavior: Clip.antiAlias,
-    child: InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                TintedIcon(icon, color: color, size: 42),
-                const Spacer(),
-                Icon(
-                  Icons.add_circle,
-                  color: color.withValues(alpha: 0.9),
-                  size: 22,
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              label,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-}
 
-class _RecentInvoiceRow extends StatelessWidget {
-  const _RecentInvoiceRow({required this.row, required this.onTap});
-  final Map<String, String> row;
-  final VoidCallback onTap;
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final customer = row['customer'] ?? '';
-    final initial = customer.trim().isEmpty
-        ? '#'
-        : customer.trim()[0].toUpperCase();
-    return InkWell(
+    return Pressable(
       onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        child: Row(
+      color: theme.colorScheme.surface,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+        ),
+        child: Column(
           children: [
-            CircleAvatar(
-              radius: 22,
-              backgroundColor: theme.colorScheme.primaryContainer,
-              foregroundColor: theme.colorScheme.onPrimaryContainer,
+            IconTile(icon, tone: tone, size: 44),
+            const SizedBox(height: 8),
+            FittedBox(
+              fit: BoxFit.scaleDown,
               child: Text(
-                initial,
-                style: const TextStyle(fontWeight: FontWeight.w700),
+                label,
+                maxLines: 1,
+                style: inter(
+                  13.5,
+                  FontWeight.w600,
+                  theme.colorScheme.onSurface,
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    customer.isEmpty ? 'Customer' : customer,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    [
-                      row['number'] ?? '',
-                      row['date'] ?? '',
-                    ].where((part) => part.isNotEmpty).join('  •  '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 10),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(row['amount'] ?? '', style: theme.textTheme.titleMedium),
-                const SizedBox(height: 4),
-                InvoiceStatusBadge(row['status'] ?? 'draft'),
-              ],
             ),
           ],
         ),

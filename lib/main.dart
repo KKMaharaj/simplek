@@ -639,24 +639,24 @@ void _returnToDashboard(BuildContext context) {
   Navigator.of(context).popUntil((route) => route.isFirst);
 }
 
-/// The signed-in app frame: bottom navigation on phones, a sidebar on wide
-/// screens such as the web app on a laptop.
+/// The signed-in app frame (UI-25): a white sidebar from 1024 px, a ☰ button
+/// with a full-width slide-in panel below that, and the bottom bar on phones.
 class _ModernHome extends StatelessWidget {
   const _ModernHome();
 
-  static const _wideBreakpoint = 900.0;
+  static const _sidebarBreakpoint = 1024.0;
+  static const _phoneBreakpoint = 600.0;
   static const _moreIndex = 4;
 
-  /// Sidebar order on wide screens: (destination index, icon, label).
+  /// Sidebar order: (destination index, icon, label).
   static const _sidebar = <(int, IconData, String)>[
     (0, Icons.home_outlined, 'Home'),
     (1, Icons.receipt_long_outlined, 'Invoices'),
     (5, Icons.description_outlined, 'Quotations'),
-    (6, Icons.payments_outlined, 'Payments'),
+    (6, Icons.account_balance_wallet_outlined, 'Payments'),
     (2, Icons.people_alt_outlined, 'Customers'),
-    (3, Icons.inventory_2_outlined, 'Products & Services'),
+    (3, Icons.inventory_2_outlined, 'Products and services'),
     (7, Icons.bar_chart_outlined, 'Reports'),
-    (8, Icons.settings_outlined, 'Settings'),
   ];
 
   static Widget _page(int index) => switch (index) {
@@ -681,46 +681,50 @@ class _ModernHome extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+                padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
                 child: Text(
                   'Create',
                   style: Theme.of(sheet).textTheme.headlineSmall,
                 ),
               ),
-              for (final entry in const [
-                (
-                  Icons.receipt_long_outlined,
-                  'New invoice',
-                  'Bill a customer and share the PDF',
-                  SimplekColors.brand,
-                ),
-                (
-                  Icons.description_outlined,
-                  'New quotation',
-                  'Send a price estimate first',
-                  SimplekColors.violet,
-                ),
-                (
-                  Icons.payments_outlined,
-                  'Record payment',
-                  'Mark money received on an invoice',
-                  SimplekColors.success,
-                ),
-              ].indexed)
-                ListTile(
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  leading: TintedIcon(entry.$2.$1, color: entry.$2.$4),
-                  title: Text(entry.$2.$2),
-                  subtitle: Text(entry.$2.$3),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => Navigator.of(sheet).pop(entry.$1),
-                ),
+              RowGroup(
+                children: [
+                  for (final entry in const [
+                    (
+                      Icons.receipt_long_outlined,
+                      'New invoice',
+                      'Bill a customer and share the PDF',
+                      TileTone.orange,
+                    ),
+                    (
+                      Icons.description_outlined,
+                      'New quotation',
+                      'Send a price estimate first',
+                      TileTone.sky,
+                    ),
+                    (
+                      Icons.account_balance_wallet_outlined,
+                      'Record payment',
+                      'Mark money received on an invoice',
+                      TileTone.navy,
+                    ),
+                  ].indexed)
+                    ListRowTile(
+                      leading: IconTile(
+                        entry.$2.$1,
+                        tone: entry.$2.$4,
+                        size: 40,
+                      ),
+                      title: entry.$2.$2,
+                      subtitle: entry.$2.$3,
+                      showChevron: true,
+                      onTap: () => Navigator.of(sheet).pop(entry.$1),
+                    ),
+                ],
+              ),
             ],
           ),
         ),
@@ -760,104 +764,267 @@ class _ModernHome extends StatelessWidget {
     valueListenable: DesignSettings.destination,
     builder: (context, index, _) => LayoutBuilder(
       builder: (context, constraints) {
-        final wide = constraints.maxWidth >= _wideBreakpoint;
-        // "More" only exists on phones; its tools are in the sidebar.
-        final shown = wide && index == _moreIndex ? 0 : index;
+        final width = constraints.maxWidth;
+        final sidebar = width >= _sidebarBreakpoint;
+        final phone = width < _phoneBreakpoint;
+        // "More" only exists with the bottom bar; its tools are in the menu.
+        final shown = !phone && index == _moreIndex ? 0 : index;
         final page = KeyedSubtree(key: ValueKey(shown), child: _page(shown));
+        final Widget frame;
+        if (sidebar) {
+          frame = Scaffold(
+            body: Row(
+              children: [
+                _Sidebar(selected: shown, onCreate: () => _create(context)),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 1160),
+                      child: page,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        } else if (!phone) {
+          frame = _MenuFrame(
+            page: page,
+            selected: shown,
+            onCreate: () => _create(context),
+          );
+        } else {
+          frame = Scaffold(
+            body: page,
+            bottomNavigationBar: DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border(
+                  top: BorderSide(
+                    color: Theme.of(context).colorScheme.outlineVariant,
+                  ),
+                ),
+              ),
+              child: NavigationBar(
+                selectedIndex: index > _moreIndex ? _moreIndex : index,
+                onDestinationSelected: (value) {
+                  HapticFeedback.selectionClick();
+                  DesignSettings.destination.value = value;
+                },
+                destinations: const [
+                  NavigationDestination(
+                    icon: Icon(Icons.home_outlined),
+                    selectedIcon: Icon(Icons.home_rounded),
+                    label: 'Home',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.receipt_long_outlined),
+                    selectedIcon: Icon(Icons.receipt_long),
+                    label: 'Invoices',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.people_alt_outlined),
+                    selectedIcon: Icon(Icons.people_alt),
+                    label: 'Customers',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.inventory_2_outlined),
+                    selectedIcon: Icon(Icons.inventory_2),
+                    label: 'Items',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.grid_view_outlined),
+                    selectedIcon: Icon(Icons.grid_view_rounded),
+                    label: 'More',
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
         return PopScope(
           canPop: index == 0,
           onPopInvokedWithResult: (didPop, result) {
             if (!didPop) DesignSettings.destination.value = 0;
           },
-          child: wide
-              ? Scaffold(
-                  body: Row(
-                    children: [
-                      _Sidebar(
-                        selected: shown,
-                        onCreate: () => _create(context),
-                      ),
-                      Expanded(
-                        child: Align(
-                          alignment: Alignment.topCenter,
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 1080),
-                            child: page,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              : Scaffold(
-                  body: page,
-                  floatingActionButton:
-                      !BusinessAccess.readOnly &&
-                          (index == 0 || index == _moreIndex)
-                      ? FloatingActionButton.extended(
-                          onPressed: () => _create(context),
-                          icon: const Icon(Icons.add),
-                          label: const Text('Create'),
-                        )
-                      : null,
-                  bottomNavigationBar: DecoratedBox(
-                    decoration: BoxDecoration(
-                      border: Border(
-                        top: BorderSide(
-                          color: Theme.of(context).colorScheme.outlineVariant,
-                        ),
-                      ),
-                    ),
-                    child: NavigationBar(
-                      selectedIndex: index > _moreIndex ? _moreIndex : index,
-                      onDestinationSelected: (value) =>
-                          DesignSettings.destination.value = value,
-                      destinations: const [
-                        NavigationDestination(
-                          icon: Icon(Icons.home_outlined),
-                          selectedIcon: Icon(Icons.home_rounded),
-                          label: 'Home',
-                        ),
-                        NavigationDestination(
-                          icon: Icon(Icons.receipt_long_outlined),
-                          selectedIcon: Icon(Icons.receipt_long),
-                          label: 'Invoices',
-                        ),
-                        NavigationDestination(
-                          icon: Icon(Icons.people_alt_outlined),
-                          selectedIcon: Icon(Icons.people_alt),
-                          label: 'Customers',
-                        ),
-                        NavigationDestination(
-                          icon: Icon(Icons.inventory_2_outlined),
-                          selectedIcon: Icon(Icons.inventory_2),
-                          label: 'Items',
-                        ),
-                        NavigationDestination(
-                          icon: Icon(Icons.grid_view_outlined),
-                          selectedIcon: Icon(Icons.grid_view_rounded),
-                          label: 'More',
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+          child: frame,
         );
       },
     ),
   );
 }
 
-class _Sidebar extends StatelessWidget {
-  const _Sidebar({required this.selected, required this.onCreate});
+/// 600-1023 px: a slim top bar with ☰, which opens the sidebar as a
+/// full-width panel that closes with ✕, a link or Escape.
+class _MenuFrame extends StatelessWidget {
+  const _MenuFrame({
+    required this.page,
+    required this.selected,
+    required this.onCreate,
+  });
+  final Widget page;
   final int selected;
   final VoidCallback onCreate;
 
   @override
+  Widget build(BuildContext context) => Scaffold(
+    drawer: Drawer(
+      width: MediaQuery.sizeOf(context).width,
+      child: Builder(
+        builder: (drawerContext) => CallbackShortcuts(
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.escape): () =>
+                Navigator.of(drawerContext).maybePop(),
+          },
+          child: Focus(
+            autofocus: true,
+            child: _Sidebar(
+              selected: selected,
+              onCreate: () {
+                Navigator.of(drawerContext).pop();
+                onCreate();
+              },
+              onClose: () => Navigator.of(drawerContext).pop(),
+            ),
+          ),
+        ),
+      ),
+    ),
+    body: Column(
+      children: [
+        SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+            child: Row(
+              children: [
+                Builder(
+                  builder: (context) => SquareIconButton(
+                    icon: Icons.menu,
+                    tooltip: 'Open menu',
+                    onPressed: () => Scaffold.of(context).openDrawer(),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const _Wordmark(),
+              ],
+            ),
+          ),
+        ),
+        Expanded(child: page),
+      ],
+    ),
+  );
+}
+
+/// The navy square with the receipt mark, and "Simplek" in Fraunces.
+class _Wordmark extends StatelessWidget {
+  const _Wordmark();
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: SimplekColors.navy,
+          borderRadius: BorderRadius.circular(11),
+        ),
+        child: const Icon(
+          Icons.receipt_long,
+          color: SimplekColors.orange,
+          size: 22,
+        ),
+      ),
+      const SizedBox(width: 10),
+      Text(
+        'Simplek',
+        style: fraunces(24, Theme.of(context).colorScheme.onSurface),
+      ),
+    ],
+  );
+}
+
+class _Sidebar extends StatelessWidget {
+  const _Sidebar({
+    required this.selected,
+    required this.onCreate,
+    this.onClose,
+  });
+  final int selected;
+  final VoidCallback onCreate;
+
+  /// Set when shown as the slide-in panel: adds a ✕ button.
+  final VoidCallback? onClose;
+
+  void _go(BuildContext context, VoidCallback action) {
+    onClose?.call();
+    action();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final dark = theme.brightness == Brightness.dark;
+    final profile = BusinessSettings.profile.value;
+    final business = (profile['name'] ?? '').trim();
+    final initials = business.isEmpty
+        ? 'S'
+        : business
+              .split(RegExp(r'\s+'))
+              .where((word) => word.isNotEmpty)
+              .take(2)
+              .map((word) => word[0].toUpperCase())
+              .join();
+    Widget item(
+      IconData icon,
+      String label,
+      bool isSelected,
+      VoidCallback onTap,
+    ) => Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Pressable(
+        onTap: () => _go(context, onTap),
+        borderRadius: BorderRadius.circular(12),
+        color: isSelected
+            ? (dark ? SimplekColors.navyDeep : SimplekColors.orangeTint)
+            : null,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 46),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Row(
+              children: [
+                Icon(
+                  icon,
+                  size: 22,
+                  color: isSelected
+                      ? (dark ? SimplekColors.orange : SimplekColors.orangeText)
+                      : scheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Text(
+                    label,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: inter(
+                      15,
+                      isSelected ? FontWeight.w700 : FontWeight.w500,
+                      isSelected ? scheme.onSurface : scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
     return Container(
-      width: 264,
+      width: onClose == null ? 248 : null,
       decoration: BoxDecoration(
         color: scheme.surface,
         border: Border(right: BorderSide(color: scheme.outlineVariant)),
@@ -870,23 +1037,13 @@ class _Sidebar extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: Image.asset(
-                      'assets/branding/simplek-app-icon-hd.png',
-                      width: 38,
-                      height: 38,
+                  const Expanded(child: _Wordmark()),
+                  if (onClose != null)
+                    SquareIconButton(
+                      icon: Icons.close,
+                      tooltip: 'Close menu',
+                      onPressed: onClose,
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  const Text(
-                    'Simplek',
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.5,
-                    ),
-                  ),
                 ],
               ),
               const SizedBox(height: 22),
@@ -899,69 +1056,94 @@ class _Sidebar extends StatelessWidget {
               Expanded(
                 child: ListView(
                   children: [
-                    for (final item in _ModernHome._sidebar)
-                      if (!(BusinessAccess.readOnly && item.$1 == 8))
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: ListTile(
-                            dense: true,
-                            selected: item.$1 == selected,
-                            selectedTileColor: scheme.primaryContainer,
-                            selectedColor: scheme.onPrimaryContainer,
-                            shape: const StadiumBorder(),
-                            leading: Icon(item.$2),
-                            title: Text(
-                              item.$3,
-                              style: TextStyle(
-                                fontSize: 14.5,
-                                fontWeight: item.$1 == selected
-                                    ? FontWeight.w700
-                                    : FontWeight.w500,
-                              ),
-                            ),
-                            onTap: () =>
-                                DesignSettings.destination.value = item.$1,
-                          ),
-                        ),
-                    ListTile(
-                      dense: true,
-                      shape: const StadiumBorder(),
-                      leading: const Icon(Icons.search),
-                      title: const Text(
-                        'Search',
-                        style: TextStyle(fontSize: 14.5),
+                    for (final entry in _ModernHome._sidebar)
+                      item(
+                        entry.$2,
+                        entry.$3,
+                        entry.$1 == selected,
+                        () => DesignSettings.destination.value = entry.$1,
                       ),
-                      onTap: () => _openPage(context, const GlobalSearchPage()),
+                    const Divider(height: 20),
+                    item(
+                      Icons.search,
+                      'Search everything',
+                      false,
+                      () => _openPage(context, const GlobalSearchPage()),
                     ),
-                    ListTile(
-                      dense: true,
-                      shape: const StadiumBorder(),
-                      leading: const Icon(Icons.supervisor_account_outlined),
-                      title: const Text(
-                        'Accountant access',
-                        style: TextStyle(fontSize: 14.5),
+                    item(
+                      Icons.supervisor_account_outlined,
+                      'Accountant access',
+                      false,
+                      () => _openPage(context, const AccountantAccessPage()),
+                    ),
+                    item(
+                      Icons.cloud_done_outlined,
+                      'Sync and backup',
+                      false,
+                      () => _openPage(context, const SyncCenterPage()),
+                    ),
+                    if (!BusinessAccess.readOnly)
+                      item(
+                        Icons.settings_outlined,
+                        'Settings',
+                        selected == 8,
+                        () => DesignSettings.destination.value = 8,
                       ),
-                      onTap: () =>
-                          _openPage(context, const AccountantAccessPage()),
-                    ),
-                    ListTile(
-                      dense: true,
-                      shape: const StadiumBorder(),
-                      leading: const Icon(Icons.cloud_sync_outlined),
-                      title: const Text(
-                        'Sync & backup',
-                        style: TextStyle(fontSize: 14.5),
-                      ),
-                      onTap: () => _openPage(context, const SyncCenterPage()),
-                    ),
                   ],
                 ),
               ),
               const SizedBox(height: 8),
-              TextButton.icon(
-                onPressed: () => _confirmLogout(context),
-                icon: const Icon(Icons.logout),
-                label: const Text('Log out'),
+              Container(
+                padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
+                decoration: BoxDecoration(
+                  color: dark ? SimplekColors.navyDeep : SimplekColors.page,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: SimplekColors.orange,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        initials,
+                        style: inter(15, FontWeight.w700, SimplekColors.navy),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            business.isEmpty ? 'Your business' : business,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: inter(14, FontWeight.w700, scheme.onSurface),
+                          ),
+                          Text(
+                            'Version $appVersion',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Log out',
+                      onPressed: () => _confirmLogout(context),
+                      icon: Icon(
+                        Icons.logout,
+                        color: dark
+                            ? SimplekColors.orange
+                            : SimplekColors.orangeText,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -978,7 +1160,7 @@ Future<void> _confirmLogout(BuildContext context) async {
       title: const Text('Log out of Simplek?'),
       content: const Text('You will need your password to log in again.'),
       actions: [
-        TextButton(
+        OutlinedButton(
           onPressed: () => Navigator.pop(dialog, false),
           child: const Text('Stay'),
         ),
@@ -998,112 +1180,161 @@ class _MorePage extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final profile = BusinessSettings.profile.value;
-    final business = profile['name'] ?? '';
+    final business = (profile['name'] ?? '').trim();
+    final gstin = (profile['gstin'] ?? '').trim();
+    final initials = business.isEmpty
+        ? 'S'
+        : business
+              .split(RegExp(r'\s+'))
+              .where((word) => word.isNotEmpty)
+              .take(2)
+              .map((word) => word[0].toUpperCase())
+              .join();
     return Scaffold(
       appBar: AppBar(title: const Text('More')),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 104),
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
         children: [
-          Card(
-            clipBehavior: Clip.antiAlias,
-            child: ListTile(
-              contentPadding: const EdgeInsets.all(16),
-              leading: CircleAvatar(
-                radius: 26,
-                backgroundColor: theme.colorScheme.primaryContainer,
-                foregroundColor: theme.colorScheme.onPrimaryContainer,
-                child: Text(
-                  business.trim().isEmpty
-                      ? 'S'
-                      : business.trim()[0].toUpperCase(),
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: theme.brightness == Brightness.dark
+                  ? SimplekColors.navyDeep
+                  : SimplekColors.navy,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 52,
+                  height: 52,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: SimplekColors.orange,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Text(
+                    initials,
+                    style: inter(19, FontWeight.w700, SimplekColors.navy),
                   ),
                 ),
-              ),
-              title: Text(
-                business.isEmpty ? 'Your business' : business,
-                style: theme.textTheme.titleLarge,
-              ),
-              subtitle: const Text('Business profile and settings'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: BusinessAccess.readOnly
-                  ? null
-                  : () => _openPage(context, const BusinessSettingsPage()),
-            ),
-          ),
-          const SizedBox(height: 22),
-          Text('Tools', style: theme.textTheme.titleLarge),
-          const SizedBox(height: 10),
-          Card(
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              children: [
-                for (final (index, entry)
-                    in <(IconData, String, String, Color, Widget)>[
-                      (
-                        Icons.description_outlined,
-                        'Quotations',
-                        'Estimates you can convert to invoices',
-                        SimplekColors.violet,
-                        const QuotationsPage(),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        business.isEmpty ? 'Your business' : business,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: inter(17, FontWeight.w700, Colors.white),
                       ),
-                      (
-                        Icons.payments_outlined,
-                        'Payments',
-                        'Record money received',
-                        SimplekColors.success,
-                        const PaymentsPage(),
-                      ),
-                      (
-                        Icons.bar_chart_outlined,
-                        'Reports',
-                        'Sales, GST and exports',
-                        SimplekColors.warning,
-                        const ReportsPage(),
-                      ),
-                      (
-                        Icons.search,
-                        'Search everything',
-                        'Customers, items and documents',
-                        SimplekColors.brand,
-                        const GlobalSearchPage(),
-                      ),
-                      (
-                        Icons.supervisor_account_outlined,
-                        'Accountant access',
-                        'Share your business, view-only',
-                        SimplekColors.violet,
-                        const AccountantAccessPage(),
-                      ),
-                      (
-                        Icons.cloud_sync_outlined,
-                        'Sync & backup',
-                        'Upload anything still on this device',
-                        SimplekColors.success,
-                        const SyncCenterPage(),
-                      ),
-                    ].indexed) ...[
-                  if (index > 0) const Divider(indent: 72),
-                  ListTile(
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 6,
-                    ),
-                    leading: TintedIcon(entry.$1, color: entry.$4),
-                    title: Text(entry.$2),
-                    subtitle: Text(entry.$3),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => _openPage(context, entry.$5),
+                      if (BusinessSettings.isGstRegistered.value &&
+                          gstin.isNotEmpty)
+                        Text(
+                          'GSTIN $gstin',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: inter(
+                            13,
+                            FontWeight.w500,
+                            const Color(0xCCFFFFFF),
+                          ),
+                        ),
+                    ],
                   ),
-                ],
+                ),
+                if (!BusinessAccess.readOnly)
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: SimplekColors.navy2,
+                      minimumSize: const Size(48, 40),
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                    ),
+                    onPressed: () =>
+                        _openPage(context, const BusinessSettingsPage()),
+                    child: const Text('Edit'),
+                  ),
               ],
             ),
           ),
-          const SizedBox(height: 22),
+          const SizedBox(height: 14),
+          RowGroup(
+            children: [
+              for (final entry
+                  in <(IconData, String, String, TileTone, Widget)>[
+                    (
+                      Icons.description_outlined,
+                      'Quotations',
+                      'Send prices before you bill',
+                      TileTone.sky,
+                      const QuotationsPage(),
+                    ),
+                    (
+                      Icons.account_balance_wallet_outlined,
+                      'Payments',
+                      'Record money you received',
+                      TileTone.orange,
+                      const PaymentsPage(),
+                    ),
+                    (
+                      Icons.bar_chart_outlined,
+                      'Reports',
+                      BusinessSettings.isGstRegistered.value
+                          ? 'Sales, dues, GSTR-1, Tally'
+                          : 'Sales, dues, Tally',
+                      TileTone.navy,
+                      const ReportsPage(),
+                    ),
+                    (
+                      Icons.search,
+                      'Search everything',
+                      'Customers, items, invoices',
+                      TileTone.sky,
+                      const GlobalSearchPage(),
+                    ),
+                    (
+                      Icons.supervisor_account_outlined,
+                      'Accountant access',
+                      'Give a view-only login',
+                      TileTone.orange,
+                      const AccountantAccessPage(),
+                    ),
+                    (
+                      Icons.cloud_done_outlined,
+                      'Sync and backup',
+                      'Everything is on the server',
+                      TileTone.navy,
+                      const SyncCenterPage(),
+                    ),
+                    if (!BusinessAccess.readOnly)
+                      (
+                        Icons.settings_outlined,
+                        'Business settings',
+                        'Profile, branding, app preferences',
+                        TileTone.sky,
+                        const BusinessSettingsPage(),
+                      ),
+                  ])
+                ListRowTile(
+                  leading: IconTile(entry.$1, tone: entry.$4, size: 40),
+                  title: entry.$2,
+                  subtitle: entry.$3,
+                  showChevron: true,
+                  onTap: () => _openPage(context, entry.$5),
+                ),
+            ],
+          ),
+          const SizedBox(height: 14),
           OutlinedButton.icon(
             onPressed: () => _confirmLogout(context),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: theme.brightness == Brightness.dark
+                  ? SimplekColors.orange
+                  : SimplekColors.orangeText,
+              side: BorderSide(color: theme.colorScheme.outlineVariant),
+              minimumSize: const Size.fromHeight(52),
+            ),
             icon: const Icon(Icons.logout),
             label: const Text('Log out'),
           ),
@@ -1551,18 +1782,20 @@ class _AccountantAccessPageState extends State<AccountantAccessPage> {
                   const SizedBox(height: 14),
                   Form(
                     key: _formKey,
-                    child: TextFormField(
-                      controller: _emailController,
-                      keyboardType: TextInputType.emailAddress,
-                      autocorrect: false,
-                      decoration: const InputDecoration(
-                        labelText: "Accountant's email",
-                        helperText:
-                            'Use the email they sign up to Simplek with.',
-                        prefixIcon: Icon(Icons.alternate_email),
+                    child: LabeledField(
+                      label: "Accountant's email",
+                      child: TextFormField(
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        autocorrect: false,
+                        decoration: const InputDecoration(
+                          helperText:
+                              'Use the email they sign up to Simplek with.',
+                          prefixIcon: Icon(Icons.alternate_email),
+                        ),
+                        validator: _emailValidator,
+                        onFieldSubmitted: (_) => _invite(),
                       ),
-                      validator: _emailValidator,
-                      onFieldSubmitted: (_) => _invite(),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -1799,42 +2032,44 @@ class _LoginPageState extends State<LoginPage> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            TextFormField(
-                              controller: _emailController,
-                              keyboardType: TextInputType.emailAddress,
-                              autofillHints: const [AutofillHints.email],
-                              decoration: const InputDecoration(
-                                labelText: 'Email',
-                                prefixIcon: Icon(Icons.email_outlined),
-                                border: OutlineInputBorder(),
+                            LabeledField(
+                              label: 'Email',
+                              child: TextFormField(
+                                controller: _emailController,
+                                keyboardType: TextInputType.emailAddress,
+                                autofillHints: const [AutofillHints.email],
+                                decoration: const InputDecoration(
+                                  prefixIcon: Icon(Icons.email_outlined),
+                                ),
+                                validator: _emailValidator,
                               ),
-                              validator: _emailValidator,
                             ),
                             const SizedBox(height: 14),
-                            TextFormField(
-                              controller: _passwordController,
-                              obscureText: !_showPassword,
-                              autofillHints: const [AutofillHints.password],
-                              decoration: InputDecoration(
-                                labelText: 'Password',
-                                prefixIcon: const Icon(Icons.lock_outline),
-                                border: const OutlineInputBorder(),
-                                suffixIcon: IconButton(
-                                  onPressed: () => setState(
-                                    () => _showPassword = !_showPassword,
-                                  ),
-                                  icon: Icon(
-                                    _showPassword
-                                        ? Icons.visibility_off_outlined
-                                        : Icons.visibility_outlined,
+                            LabeledField(
+                              label: 'Password',
+                              child: TextFormField(
+                                controller: _passwordController,
+                                obscureText: !_showPassword,
+                                autofillHints: const [AutofillHints.password],
+                                decoration: InputDecoration(
+                                  prefixIcon: const Icon(Icons.lock_outline),
+                                  suffixIcon: IconButton(
+                                    onPressed: () => setState(
+                                      () => _showPassword = !_showPassword,
+                                    ),
+                                    icon: Icon(
+                                      _showPassword
+                                          ? Icons.visibility_off_outlined
+                                          : Icons.visibility_outlined,
+                                    ),
                                   ),
                                 ),
+                                validator: (value) =>
+                                    value == null || value.isEmpty
+                                    ? 'Password is required'
+                                    : null,
+                                onFieldSubmitted: (_) => _login(),
                               ),
-                              validator: (value) =>
-                                  value == null || value.isEmpty
-                                  ? 'Password is required'
-                                  : null,
-                              onFieldSubmitted: (_) => _login(),
                             ),
                             Row(
                               children: [
@@ -2001,60 +2236,64 @@ class _SignupPageState extends State<SignupPage> {
               'We will email a verification link before asking you to create a password.',
             ),
             const SizedBox(height: 24),
-            TextFormField(
-              controller: _nameController,
-              textCapitalization: TextCapitalization.words,
-              inputFormatters: [_TitleCaseFormatter()],
-              autofillHints: const [AutofillHints.name],
-              decoration: const InputDecoration(
-                labelText: 'Name',
-                prefixIcon: Icon(Icons.person_outline),
-                border: OutlineInputBorder(),
-              ),
-              validator: (value) => value == null || value.trim().isEmpty
-                  ? 'Name is required'
-                  : null,
-            ),
-            const SizedBox(height: 14),
-            TextFormField(
-              controller: _businessController,
-              textCapitalization: TextCapitalization.words,
-              inputFormatters: [_TitleCaseFormatter()],
-              autofillHints: const [AutofillHints.organizationName],
-              decoration: const InputDecoration(
-                labelText: 'Business name (optional)',
-                prefixIcon: Icon(Icons.business_outlined),
-                border: OutlineInputBorder(),
+            LabeledField(
+              label: 'Name',
+              child: TextFormField(
+                controller: _nameController,
+                textCapitalization: TextCapitalization.words,
+                inputFormatters: [_TitleCaseFormatter()],
+                autofillHints: const [AutofillHints.name],
+                decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.person_outline),
+                ),
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? 'Name is required'
+                    : null,
               ),
             ),
             const SizedBox(height: 14),
-            TextFormField(
-              controller: _mobileController,
-              keyboardType: TextInputType.phone,
-              inputFormatters: [_IndianMobileFormatter()],
-              autofillHints: const [AutofillHints.telephoneNumber],
-              decoration: const InputDecoration(
-                labelText: 'Mobile number',
-                prefixIcon: Icon(Icons.phone_outlined),
-                border: OutlineInputBorder(),
-                helperText: 'India: enter 10 digits',
+            LabeledField(
+              label: 'Business name (optional)',
+              child: TextFormField(
+                controller: _businessController,
+                textCapitalization: TextCapitalization.words,
+                inputFormatters: [_TitleCaseFormatter()],
+                autofillHints: const [AutofillHints.organizationName],
+                decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.business_outlined),
+                ),
               ),
-              validator: (value) =>
-                  RegExp(r'^[6-9]\d{9}$').hasMatch(value?.trim() ?? '')
-                  ? null
-                  : 'Enter a valid 10-digit mobile number',
             ),
             const SizedBox(height: 14),
-            TextFormField(
-              controller: _emailController,
-              keyboardType: TextInputType.emailAddress,
-              autofillHints: const [AutofillHints.email],
-              decoration: const InputDecoration(
-                labelText: 'Email',
-                prefixIcon: Icon(Icons.email_outlined),
-                border: OutlineInputBorder(),
+            LabeledField(
+              label: 'Mobile number',
+              child: TextFormField(
+                controller: _mobileController,
+                keyboardType: TextInputType.phone,
+                inputFormatters: [_IndianMobileFormatter()],
+                autofillHints: const [AutofillHints.telephoneNumber],
+                decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.phone_outlined),
+                  helperText: 'India: enter 10 digits',
+                ),
+                validator: (value) =>
+                    RegExp(r'^[6-9]\d{9}$').hasMatch(value?.trim() ?? '')
+                    ? null
+                    : 'Enter a valid 10-digit mobile number',
               ),
-              validator: _emailValidator,
+            ),
+            const SizedBox(height: 14),
+            LabeledField(
+              label: 'Email',
+              child: TextFormField(
+                controller: _emailController,
+                keyboardType: TextInputType.emailAddress,
+                autofillHints: const [AutofillHints.email],
+                decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.email_outlined),
+                ),
+                validator: _emailValidator,
+              ),
             ),
             const SizedBox(height: 26),
             FilledButton.icon(
@@ -2274,40 +2513,41 @@ class _PasswordSetupPageState extends State<PasswordSetupPage> {
             AutofillGroup(
               child: Column(
                 children: [
-                  TextFormField(
-                    controller: _passwordController,
-                    obscureText: !_showPasswords,
-                    autofillHints: const [AutofillHints.newPassword],
-                    decoration: InputDecoration(
-                      labelText: 'Password',
-                      border: const OutlineInputBorder(),
-                      suffixIcon: IconButton(
-                        onPressed: () =>
-                            setState(() => _showPasswords = !_showPasswords),
-                        icon: Icon(
-                          _showPasswords
-                              ? Icons.visibility_off_outlined
-                              : Icons.visibility_outlined,
+                  LabeledField(
+                    label: 'Password',
+                    child: TextFormField(
+                      controller: _passwordController,
+                      obscureText: !_showPasswords,
+                      autofillHints: const [AutofillHints.newPassword],
+                      decoration: InputDecoration(
+                        suffixIcon: IconButton(
+                          onPressed: () =>
+                              setState(() => _showPasswords = !_showPasswords),
+                          icon: Icon(
+                            _showPasswords
+                                ? Icons.visibility_off_outlined
+                                : Icons.visibility_outlined,
+                          ),
                         ),
                       ),
+                      validator: (value) => value != null && value.length >= 8
+                          ? null
+                          : 'Use at least 8 characters',
                     ),
-                    validator: (value) => value != null && value.length >= 8
-                        ? null
-                        : 'Use at least 8 characters',
                   ),
                   const SizedBox(height: 14),
-                  TextFormField(
-                    controller: _confirmController,
-                    obscureText: !_showPasswords,
-                    autofillHints: const [AutofillHints.newPassword],
-                    decoration: const InputDecoration(
-                      labelText: 'Confirm password',
-                      border: OutlineInputBorder(),
+                  LabeledField(
+                    label: 'Confirm password',
+                    child: TextFormField(
+                      controller: _confirmController,
+                      obscureText: !_showPasswords,
+                      autofillHints: const [AutofillHints.newPassword],
+                      decoration: const InputDecoration(),
+                      validator: (value) => value == _passwordController.text
+                          ? null
+                          : 'Passwords do not match',
+                      onFieldSubmitted: (_) => _setPassword(),
                     ),
-                    validator: (value) => value == _passwordController.text
-                        ? null
-                        : 'Passwords do not match',
-                    onFieldSubmitted: (_) => _setPassword(),
                   ),
                 ],
               ),
@@ -2902,30 +3142,30 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
           'These standard terms are editable now and on every document.',
         ),
         const SizedBox(height: 14),
-        TextFormField(
-          controller: _quotationTermsController,
-          minLines: 5,
-          maxLines: 9,
-          decoration: const InputDecoration(
-            labelText: 'Default quotation terms',
-            border: OutlineInputBorder(),
+        LabeledField(
+          label: 'Default quotation terms',
+          child: TextFormField(
+            controller: _quotationTermsController,
+            minLines: 5,
+            maxLines: 9,
+            decoration: const InputDecoration(),
+            validator: (value) => value == null || value.trim().isEmpty
+                ? 'Add quotation terms'
+                : null,
           ),
-          validator: (value) => value == null || value.trim().isEmpty
-              ? 'Add quotation terms'
-              : null,
         ),
         const SizedBox(height: 14),
-        TextFormField(
-          controller: _invoiceTermsController,
-          minLines: 5,
-          maxLines: 9,
-          decoration: const InputDecoration(
-            labelText: 'Default invoice terms',
-            border: OutlineInputBorder(),
+        LabeledField(
+          label: 'Default invoice terms',
+          child: TextFormField(
+            controller: _invoiceTermsController,
+            minLines: 5,
+            maxLines: 9,
+            decoration: const InputDecoration(),
+            validator: (value) => value == null || value.trim().isEmpty
+                ? 'Add invoice terms'
+                : null,
           ),
-          validator: (value) => value == null || value.trim().isEmpty
-              ? 'Add invoice terms'
-              : null,
         ),
       ],
     ),
@@ -2947,23 +3187,24 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
           style: Theme.of(context).textTheme.bodySmall,
         ),
         const SizedBox(height: 18),
-        TextFormField(
-          controller: _upiController,
-          keyboardType: TextInputType.emailAddress,
-          onChanged: (_) => setState(() {}),
-          decoration: const InputDecoration(
-            labelText: 'UPI ID (optional)',
-            hintText: 'business@bank',
-            helperText:
-                'A scannable UPI payment QR code will be generated automatically.',
-            border: OutlineInputBorder(),
+        LabeledField(
+          label: 'UPI ID (optional)',
+          child: TextFormField(
+            controller: _upiController,
+            keyboardType: TextInputType.emailAddress,
+            onChanged: (_) => setState(() {}),
+            decoration: const InputDecoration(
+              hintText: 'business@bank',
+              helperText:
+                  'A scannable UPI payment QR code will be generated automatically.',
+            ),
+            validator: (value) {
+              final upi = value?.trim() ?? '';
+              return upi.isEmpty || _isValidUpiId(upi)
+                  ? null
+                  : 'Enter a valid UPI ID';
+            },
           ),
-          validator: (value) {
-            final upi = value?.trim() ?? '';
-            return upi.isEmpty || _isValidUpiId(upi)
-                ? null
-                : 'Enter a valid UPI ID';
-          },
         ),
         if (_isValidUpiId(_upiController.text)) ...[
           const SizedBox(height: 16),
@@ -2986,24 +3227,25 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
         const SizedBox(height: 22),
         Text('Bank details', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 12),
-        TextFormField(
-          controller: _ifscController,
-          inputFormatters: upperCaseCodeFormatters(11),
-          onChanged: _lookupOnboardingIfsc,
-          decoration: const InputDecoration(
-            labelText: 'IFSC code',
-            helperText:
-                'Enter the IFSC Code to prefill bank and branch details',
-            border: OutlineInputBorder(),
+        LabeledField(
+          label: 'IFSC code',
+          child: TextFormField(
+            controller: _ifscController,
+            inputFormatters: upperCaseCodeFormatters(11),
+            onChanged: _lookupOnboardingIfsc,
+            decoration: const InputDecoration(
+              helperText:
+                  'Enter the IFSC Code to prefill bank and branch details',
+            ),
+            validator: (value) =>
+                value == null ||
+                    value.trim().isEmpty ||
+                    RegExp(
+                      r'^[A-Z]{4}0[A-Z0-9]{6}$',
+                    ).hasMatch(value.trim().toUpperCase())
+                ? null
+                : 'Enter a valid IFSC code',
           ),
-          validator: (value) =>
-              value == null ||
-                  value.trim().isEmpty ||
-                  RegExp(
-                    r'^[A-Z]{4}0[A-Z0-9]{6}$',
-                  ).hasMatch(value.trim().toUpperCase())
-              ? null
-              : 'Enter a valid IFSC code',
         ),
         if (_lookingUpIfsc || _ifscMessage != null) ...[
           const SizedBox(height: 8),
@@ -3012,29 +3254,29 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
           ),
         ],
         const SizedBox(height: 12),
-        TextFormField(
-          controller: _bankNameController,
-          decoration: const InputDecoration(
-            labelText: 'Bank name',
-            border: OutlineInputBorder(),
+        LabeledField(
+          label: 'Bank name',
+          child: TextFormField(
+            controller: _bankNameController,
+            decoration: const InputDecoration(),
           ),
         ),
         const SizedBox(height: 12),
-        TextFormField(
-          controller: _branchController,
-          decoration: const InputDecoration(
-            labelText: 'Branch',
-            border: OutlineInputBorder(),
+        LabeledField(
+          label: 'Branch',
+          child: TextFormField(
+            controller: _branchController,
+            decoration: const InputDecoration(),
           ),
         ),
         const SizedBox(height: 12),
-        TextFormField(
-          controller: _accountController,
-          keyboardType: TextInputType.number,
-          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          decoration: const InputDecoration(
-            labelText: 'Account number',
-            border: OutlineInputBorder(),
+        LabeledField(
+          label: 'Account number',
+          child: TextFormField(
+            controller: _accountController,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            decoration: const InputDecoration(),
           ),
         ),
       ],
@@ -3196,7 +3438,7 @@ class _GlobalSearchPageState extends State<GlobalSearchPage> {
             autofocus: true,
             onChanged: _scheduleSearch,
             decoration: InputDecoration(
-              labelText: 'Customers, items, invoices, quotations',
+              hintText: 'Customers, items, invoices, quotations',
               prefixIcon: const Icon(Icons.search),
               suffixIcon: _loading
                   ? const Padding(
@@ -3208,7 +3450,6 @@ class _GlobalSearchPageState extends State<GlobalSearchPage> {
                       ),
                     )
                   : null,
-              border: const OutlineInputBorder(),
             ),
           ),
         ),
@@ -3286,6 +3527,9 @@ class _DashboardPageState extends State<DashboardPage> {
   int _productCount = 0;
   double _totalSales = 0;
   double _outstanding = 0;
+  double _collected = 0;
+  int _unpaidCount = 0;
+  int _partlyPaidCount = 0;
   List<Map<String, dynamic>> _recentInvoices = [];
   bool _isLoadingSummary = true;
   String? _summaryError;
@@ -3317,7 +3561,7 @@ class _DashboardPageState extends State<DashboardPage> {
         Supabase.instance.client
             .from('invoices')
             .select(
-              'id, invoice_number, customer_name, invoice_date, status, total_amount, balance_amount',
+              'id, invoice_number, customer_name, invoice_date, status, total_amount, balance_amount, paid_amount',
             )
             .neq('status', 'draft')
             .neq('status', 'cancelled')
@@ -3337,10 +3581,16 @@ class _DashboardPageState extends State<DashboardPage> {
       final customers = List<Map<String, dynamic>>.from(results[1] as List);
       var totalSales = 0.0;
       var outstanding = 0.0;
+      var collected = 0.0;
+      var unpaid = 0;
+      var partlyPaid = 0;
       for (final invoice in invoices) {
         if (invoice['status']?.toString() != 'cancelled') {
           totalSales += _asDouble(invoice['total_amount']);
           outstanding += _asDouble(invoice['balance_amount']);
+          collected += _asDouble(invoice['paid_amount']);
+          if (_asDouble(invoice['balance_amount']) > 0) unpaid++;
+          if (invoice['status']?.toString() == 'partial') partlyPaid++;
         }
       }
       if (!mounted || request != _summaryRequest) return;
@@ -3350,6 +3600,9 @@ class _DashboardPageState extends State<DashboardPage> {
         _productCount = (results[2] as List).length;
         _totalSales = totalSales;
         _outstanding = outstanding;
+        _collected = collected;
+        _unpaidCount = unpaid;
+        _partlyPaidCount = partlyPaid;
         _recentInvoices = invoices.take(5).toList();
       });
     } catch (error) {
@@ -3372,62 +3625,50 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        elevation: 0,
-        title: const FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Text('Simplek', style: TextStyle(fontWeight: FontWeight.bold)),
+      body: SafeArea(
+        child: ModernOverview(
+          businessName: BusinessSettings.profile.value['name'] ?? '',
+          readOnly: BusinessAccess.readOnly,
+          sales: _money(_totalSales),
+          outstanding: _money(_outstanding),
+          invoiceCount: '$_invoiceCount',
+          customerCount: '$_customerCount',
+          productCount: '$_productCount',
+          loading: _isLoadingSummary,
+          error: _summaryError,
+          recent: _recentInvoices
+              .map(
+                (row) => <String, String>{
+                  'id': row['id']?.toString() ?? '',
+                  'number': row['invoice_number']?.toString() ?? 'Invoice',
+                  'customer': row['customer_name']?.toString() ?? '',
+                  'amount': _money(_asDouble(row['total_amount'])),
+                  'status': row['status']?.toString() ?? 'draft',
+                  'date': screenDate(parseStoredDate(row['invoice_date'])),
+                },
+              )
+              .toList(),
+          onNewInvoice: () => _openPage(context, const InvoiceBuilderPage()),
+          onNewQuotation: () =>
+              _openPage(context, const QuotationBuilderPage()),
+          onCustomer: () async {
+            await _showCustomerForm(context);
+            if (mounted) await _loadSummary();
+          },
+          onProduct: () => _openPage(context, const AddProductPage()),
+          onInvoices: () => DesignSettings.destination.value = 1,
+          onOpenInvoice: (id) =>
+              _openPage(context, InvoiceViewPage(invoiceId: id)),
+          onRefresh: _loadSummary,
+          onPayment: () => _openPage(context, const PaymentsPage()),
+          onSearch: () => _openPage(context, const GlobalSearchPage()),
+          onReports: () => _openPage(context, const ReportsPage()),
+          unpaidCount: _isLoadingSummary && _recentInvoices.isEmpty
+              ? null
+              : _unpaidCount,
+          collected: _money(_collected),
+          partlyPaidCount: _partlyPaidCount,
         ),
-        actions: [
-          IconButton(
-            tooltip: 'Search',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(builder: (_) => const GlobalSearchPage()),
-            ),
-            icon: const Icon(Icons.search),
-          ),
-          IconButton(
-            tooltip: 'Refresh dashboard',
-            onPressed: _isLoadingSummary ? null : _loadSummary,
-            icon: const Icon(Icons.refresh),
-          ),
-          const SizedBox(width: 8),
-        ],
-      ),
-
-      body: ModernOverview(
-        businessName: BusinessSettings.profile.value['name'] ?? '',
-        readOnly: BusinessAccess.readOnly,
-        sales: _money(_totalSales),
-        outstanding: _money(_outstanding),
-        invoiceCount: '$_invoiceCount',
-        customerCount: '$_customerCount',
-        productCount: '$_productCount',
-        loading: _isLoadingSummary,
-        error: _summaryError,
-        recent: _recentInvoices
-            .map(
-              (row) => <String, String>{
-                'id': row['id']?.toString() ?? '',
-                'number': row['invoice_number']?.toString() ?? 'Invoice',
-                'customer': row['customer_name']?.toString() ?? '',
-                'amount': _money(_asDouble(row['total_amount'])),
-                'status': row['status']?.toString() ?? 'draft',
-                'date': displayDate(parseStoredDate(row['invoice_date'])),
-              },
-            )
-            .toList(),
-        onNewInvoice: () => _openPage(context, const InvoiceBuilderPage()),
-        onNewQuotation: () => _openPage(context, const QuotationBuilderPage()),
-        onCustomer: () async {
-          await _showCustomerForm(context);
-          if (mounted) await _loadSummary();
-        },
-        onProduct: () => _openPage(context, const AddProductPage()),
-        onInvoices: () => DesignSettings.destination.value = 1,
-        onOpenInvoice: (id) =>
-            _openPage(context, InvoiceViewPage(invoiceId: id)),
-        onRefresh: _loadSummary,
       ),
     );
   }
@@ -3571,9 +3812,8 @@ class _CustomersPageState extends State<CustomersPage> {
             child: TextField(
               controller: _searchController,
               decoration: const InputDecoration(
-                labelText: 'Search customers',
+                hintText: 'Search customers',
                 prefixIcon: Icon(Icons.search),
-                border: OutlineInputBorder(),
               ),
             ),
           ),
@@ -5044,31 +5284,32 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
                       padding: const EdgeInsets.all(16),
                       child: ValueListenableBuilder<int?>(
                         valueListenable: BusinessSettings.defaultDueDay,
-                        builder: (context, dueDay, _) => TextFormField(
-                          initialValue: (dueDay ?? 7).toString(),
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.digitsOnly,
-                          ],
-                          decoration: const InputDecoration(
-                            labelText: 'Invoices due after (days)',
-                            helperText:
-                                'Prefilled with 7 days. Each invoice can change it.',
-                            suffixText: 'days',
-                            border: OutlineInputBorder(),
+                        builder: (context, dueDay, _) => LabeledField(
+                          label: 'Invoices due after (days)',
+                          child: TextFormField(
+                            initialValue: (dueDay ?? 7).toString(),
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                            ],
+                            decoration: const InputDecoration(
+                              helperText:
+                                  'Prefilled with 7 days. Each invoice can change it.',
+                              suffixText: 'days',
+                            ),
+                            validator: (value) {
+                              final days = int.tryParse(value ?? '');
+                              return days != null && days >= 0 && days <= 365
+                                  ? null
+                                  : 'Enter 0 to 365 days';
+                            },
+                            onChanged: (value) {
+                              final days = int.tryParse(value);
+                              if (days != null && days >= 0 && days <= 365) {
+                                BusinessSettings.setDefaultDueDay(days);
+                              }
+                            },
                           ),
-                          validator: (value) {
-                            final days = int.tryParse(value ?? '');
-                            return days != null && days >= 0 && days <= 365
-                                ? null
-                                : 'Enter 0 to 365 days';
-                          },
-                          onChanged: (value) {
-                            final days = int.tryParse(value);
-                            if (days != null && days >= 0 && days <= 365) {
-                              BusinessSettings.setDefaultDueDay(days);
-                            }
-                          },
                         ),
                       ),
                     ),
@@ -5085,23 +5326,23 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
                             style: Theme.of(context).textTheme.titleMedium,
                           ),
                           const SizedBox(height: 8),
-                          TextField(
-                            controller: _quotationTermsController,
-                            minLines: 3,
-                            maxLines: 6,
-                            decoration: const InputDecoration(
-                              labelText: 'Quotation terms',
-                              border: OutlineInputBorder(),
+                          LabeledField(
+                            label: 'Quotation terms',
+                            child: TextField(
+                              controller: _quotationTermsController,
+                              minLines: 3,
+                              maxLines: 6,
+                              decoration: const InputDecoration(),
                             ),
                           ),
                           const SizedBox(height: 12),
-                          TextField(
-                            controller: _invoiceTermsController,
-                            minLines: 3,
-                            maxLines: 6,
-                            decoration: const InputDecoration(
-                              labelText: 'Invoice terms',
-                              border: OutlineInputBorder(),
+                          LabeledField(
+                            label: 'Invoice terms',
+                            child: TextField(
+                              controller: _invoiceTermsController,
+                              minLines: 3,
+                              maxLines: 6,
+                              decoration: const InputDecoration(),
                             ),
                           ),
                           const SizedBox(height: 12),
@@ -5169,17 +5410,17 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
     List<TextInputFormatter>? inputFormatters,
     ValueChanged<String>? onChanged,
     String? Function(String value)? validator,
-  }) => TextFormField(
-    controller: controller,
-    minLines: lines,
-    maxLines: lines,
-    keyboardType: keyboardType,
-    inputFormatters: inputFormatters,
-    onChanged: onChanged,
-    validator: validator == null ? null : (value) => validator(value ?? ''),
-    decoration: InputDecoration(
-      labelText: label,
-      border: const OutlineInputBorder(),
+  }) => LabeledField(
+    label: label,
+    child: TextFormField(
+      controller: controller,
+      minLines: lines,
+      maxLines: lines,
+      keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
+      onChanged: onChanged,
+      validator: validator == null ? null : (value) => validator(value ?? ''),
+      decoration: const InputDecoration(),
     ),
   );
 }
@@ -5334,66 +5575,72 @@ class _PaymentsPageState extends State<PaymentsPage> {
               key: _formKey,
               child: Column(
                 children: [
-                  DropdownButtonFormField<String>(
-                    key: ValueKey(_invoiceId),
-                    initialValue: _invoiceId,
-                    decoration: const InputDecoration(
-                      labelText: 'Outstanding invoice',
-                      helperText: 'Invoice number • party • invoice date',
-                      border: OutlineInputBorder(),
-                    ),
-                    isExpanded: true,
-                    items: _invoices
-                        .map(
-                          (invoice) => DropdownMenuItem(
-                            value: invoice['id'].toString(),
-                            child: Text(
-                              '${invoice['invoice_number']} • ${invoice['customer_name']} • ${invoice['invoice_date']}',
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (value) => setState(() => _invoiceId = value),
-                    validator: (value) =>
-                        value == null ? 'Select an invoice' : null,
-                  ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _amountController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: const InputDecoration(
-                      labelText: 'Payment amount',
-                      prefixText: '₹ ',
-                      border: OutlineInputBorder(),
-                    ),
-                    validator: (value) =>
-                        double.tryParse(value ?? '') == null ||
-                            double.parse(value!) <= 0
-                        ? 'Enter a valid amount'
-                        : null,
-                  ),
-                  const SizedBox(height: 16),
-                  DropdownButtonFormField<String>(
-                    key: ValueKey(_method),
-                    initialValue: _method,
-                    decoration: const InputDecoration(
-                      labelText: 'Payment method',
-                      border: OutlineInputBorder(),
-                    ),
-                    items:
-                        const ['cash', 'upi', 'bank_transfer', 'card', 'cheque']
-                            .map(
-                              (value) => DropdownMenuItem(
-                                value: value,
-                                child: Text(value),
+                  LabeledField(
+                    label: 'Outstanding invoice',
+                    child: DropdownButtonFormField<String>(
+                      key: ValueKey(_invoiceId),
+                      initialValue: _invoiceId,
+                      decoration: const InputDecoration(
+                        helperText: 'Invoice number • party • invoice date',
+                      ),
+                      isExpanded: true,
+                      items: _invoices
+                          .map(
+                            (invoice) => DropdownMenuItem(
+                              value: invoice['id'].toString(),
+                              child: Text(
+                                '${invoice['invoice_number']} • ${invoice['customer_name']} • ${invoice['invoice_date']}',
+                                overflow: TextOverflow.ellipsis,
                               ),
-                            )
-                            .toList(),
-                    onChanged: (value) =>
-                        setState(() => _method = value ?? 'upi'),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) => setState(() => _invoiceId = value),
+                      validator: (value) =>
+                          value == null ? 'Select an invoice' : null,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  LabeledField(
+                    label: 'Payment amount',
+                    child: TextFormField(
+                      controller: _amountController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(prefixText: '₹ '),
+                      validator: (value) =>
+                          double.tryParse(value ?? '') == null ||
+                              double.parse(value!) <= 0
+                          ? 'Enter a valid amount'
+                          : null,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  LabeledField(
+                    label: 'Payment method',
+                    child: DropdownButtonFormField<String>(
+                      key: ValueKey(_method),
+                      initialValue: _method,
+                      decoration: const InputDecoration(),
+                      items:
+                          const [
+                                'cash',
+                                'upi',
+                                'bank_transfer',
+                                'card',
+                                'cheque',
+                              ]
+                              .map(
+                                (value) => DropdownMenuItem(
+                                  value: value,
+                                  child: Text(value),
+                                ),
+                              )
+                              .toList(),
+                      onChanged: (value) =>
+                          setState(() => _method = value ?? 'upi'),
+                    ),
                   ),
                   const SizedBox(height: 24),
                   FilledButton(
@@ -7031,17 +7278,19 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
                     'Prepare your quotation',
                     'Choose a customer, add items and review your totals.',
                   ),
-                TextFormField(
-                  controller: _numberController,
-                  enabled: !_saving,
-                  validator: validateDocumentNumber,
-                  decoration: InputDecoration(
-                    labelText: 'Quotation number (optional)',
-                    helperText:
-                        'Leave blank for automatic numbering for your business.',
-                    errorText: _numberError,
+                LabeledField(
+                  label: 'Quotation number (optional)',
+                  child: TextFormField(
+                    controller: _numberController,
+                    enabled: !_saving,
+                    validator: validateDocumentNumber,
+                    decoration: InputDecoration(
+                      helperText:
+                          'Leave blank for automatic numbering for your business.',
+                      errorText: _numberError,
+                    ),
+                    onChanged: (_) => setState(() => _numberError = null),
                   ),
-                  onChanged: (_) => setState(() => _numberError = null),
                 ),
                 const SizedBox(height: 12),
                 _PickedRecordField(
@@ -7135,13 +7384,13 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
                 const SizedBox(height: 16),
                 DesignSettings.modern.value
                     ? EditableTerms(controller: _termsController)
-                    : TextField(
-                        controller: _termsController,
-                        minLines: 3,
-                        maxLines: 6,
-                        decoration: const InputDecoration(
-                          labelText: 'Terms and conditions',
-                          border: OutlineInputBorder(),
+                    : LabeledField(
+                        label: 'Terms and conditions',
+                        child: TextField(
+                          controller: _termsController,
+                          minLines: 3,
+                          maxLines: 6,
+                          decoration: const InputDecoration(),
                         ),
                       ),
                 const SizedBox(height: 24),
@@ -7234,22 +7483,22 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
             ),
             if (_usesGst) ...[
               const SizedBox(height: 12),
-              TextFormField(
-                controller: item.gstRateController,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
+              LabeledField(
+                label: 'GST rate (%)',
+                child: TextFormField(
+                  controller: item.gstRateController,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  onChanged: (_) => setState(() {}),
+                  decoration: const InputDecoration(),
+                  validator: (value) {
+                    final rate = double.tryParse(value?.trim() ?? '');
+                    return rate == null || rate < 0 || rate > 100
+                        ? 'Enter 0 to 100'
+                        : null;
+                  },
                 ),
-                onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(
-                  labelText: 'GST rate (%)',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (value) {
-                  final rate = double.tryParse(value?.trim() ?? '');
-                  return rate == null || rate < 0 || rate > 100
-                      ? 'Enter 0 to 100'
-                      : null;
-                },
               ),
             ],
             const SizedBox(height: 12),
@@ -7271,20 +7520,19 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
     String label, {
     bool currency = false,
     FocusNode? focusNode,
-  }) => TextFormField(
-    controller: controller,
-    focusNode: focusNode,
-    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-    onChanged: (_) => setState(() {}),
-    decoration: InputDecoration(
-      labelText: label,
-      prefixText: currency ? '₹ ' : null,
-      border: const OutlineInputBorder(),
+  }) => LabeledField(
+    label: label,
+    child: TextFormField(
+      controller: controller,
+      focusNode: focusNode,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      onChanged: (_) => setState(() {}),
+      decoration: InputDecoration(prefixText: currency ? '₹ ' : null),
+      validator: (value) {
+        final number = double.tryParse(value?.trim() ?? '');
+        return number == null || number < 0 ? 'Enter valid $label' : null;
+      },
     ),
-    validator: (value) {
-      final number = double.tryParse(value?.trim() ?? '');
-      return number == null || number < 0 ? 'Enter valid $label' : null;
-    },
   );
   Widget _totalLine(String label, double amount, {bool emphasis = false}) =>
       Row(
@@ -8325,17 +8573,19 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                       'Create your invoice',
                       'Add a customer and items. Review before saving.',
                     ),
-                  TextFormField(
-                    controller: _numberController,
-                    enabled: !_isSavingDraft,
-                    validator: validateDocumentNumber,
-                    decoration: InputDecoration(
-                      labelText: 'Invoice number (optional)',
-                      helperText:
-                          'Leave blank for automatic numbering for your business.',
-                      errorText: _numberError,
+                  LabeledField(
+                    label: 'Invoice number (optional)',
+                    child: TextFormField(
+                      controller: _numberController,
+                      enabled: !_isSavingDraft,
+                      validator: validateDocumentNumber,
+                      decoration: InputDecoration(
+                        helperText:
+                            'Leave blank for automatic numbering for your business.',
+                        errorText: _numberError,
+                      ),
+                      onChanged: (_) => setState(() => _numberError = null),
                     ),
-                    onChanged: (_) => setState(() => _numberError = null),
                   ),
                   const SizedBox(height: 12),
                   _PickedRecordField(
@@ -8392,23 +8642,23 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                   Row(
                     children: [
                       Expanded(
-                        child: TextFormField(
-                          controller: _customerPhoneController,
-                          keyboardType: TextInputType.phone,
-                          decoration: const InputDecoration(
-                            labelText: 'Customer WhatsApp number',
-                            border: OutlineInputBorder(),
+                        child: LabeledField(
+                          label: 'Customer WhatsApp number',
+                          child: TextFormField(
+                            controller: _customerPhoneController,
+                            keyboardType: TextInputType.phone,
+                            decoration: const InputDecoration(),
                           ),
                         ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: TextFormField(
-                          controller: _customerEmailController,
-                          keyboardType: TextInputType.emailAddress,
-                          decoration: const InputDecoration(
-                            labelText: 'Customer email',
-                            border: OutlineInputBorder(),
+                        child: LabeledField(
+                          label: 'Customer email',
+                          child: TextFormField(
+                            controller: _customerEmailController,
+                            keyboardType: TextInputType.emailAddress,
+                            decoration: const InputDecoration(),
                           ),
                         ),
                       ),
@@ -8487,15 +8737,16 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                   const SizedBox(height: 16),
                   DesignSettings.modern.value
                       ? EditableTerms(controller: _termsController)
-                      : TextField(
-                          controller: _termsController,
-                          minLines: 3,
-                          maxLines: 6,
-                          decoration: const InputDecoration(
-                            labelText: 'Terms and conditions',
-                            helperText:
-                                'Prefilled from Business Settings. Editable for this invoice.',
-                            border: OutlineInputBorder(),
+                      : LabeledField(
+                          label: 'Terms and conditions',
+                          child: TextField(
+                            controller: _termsController,
+                            minLines: 3,
+                            maxLines: 6,
+                            decoration: const InputDecoration(
+                              helperText:
+                                  'Prefilled from Business Settings. Editable for this invoice.',
+                            ),
                           ),
                         ),
                   const SizedBox(height: 24),
@@ -8593,23 +8844,24 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
             ),
             if (_usesGst) ...[
               const SizedBox(height: 12),
-              TextFormField(
-                controller: item.gstRateController,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
+              LabeledField(
+                label: 'GST rate (%)',
+                child: TextFormField(
+                  controller: item.gstRateController,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  onChanged: (_) => setState(() {}),
+                  decoration: const InputDecoration(
+                    helperText: 'Enter the rate manually.',
+                  ),
+                  validator: (value) {
+                    final rate = double.tryParse(value?.trim() ?? '');
+                    return rate == null || rate < 0 || rate > 100
+                        ? 'Enter a rate from 0 to 100'
+                        : null;
+                  },
                 ),
-                onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(
-                  labelText: 'GST rate (%)',
-                  helperText: 'Enter the rate manually.',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (value) {
-                  final rate = double.tryParse(value?.trim() ?? '');
-                  return rate == null || rate < 0 || rate > 100
-                      ? 'Enter a rate from 0 to 100'
-                      : null;
-                },
               ),
             ],
             const SizedBox(height: 12),
@@ -8632,20 +8884,19 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
     bool currency = false,
     FocusNode? focusNode,
   }) {
-    return TextFormField(
-      controller: controller,
-      focusNode: focusNode,
-      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      onChanged: (_) => setState(() {}),
-      decoration: InputDecoration(
-        labelText: label,
-        prefixText: currency ? '₹ ' : null,
-        border: const OutlineInputBorder(),
+    return LabeledField(
+      label: label,
+      child: TextFormField(
+        controller: controller,
+        focusNode: focusNode,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        onChanged: (_) => setState(() {}),
+        decoration: InputDecoration(prefixText: currency ? '₹ ' : null),
+        validator: (value) {
+          final number = double.tryParse(value?.trim() ?? '');
+          return number == null || number < 0 ? 'Enter valid $label' : null;
+        },
       ),
-      validator: (value) {
-        final number = double.tryParse(value?.trim() ?? '');
-        return number == null || number < 0 ? 'Enter valid $label' : null;
-      },
     );
   }
 
@@ -9591,7 +9842,7 @@ class _ProductsPageState extends State<ProductsPage> {
             child: TextField(
               controller: _searchController,
               decoration: InputDecoration(
-                labelText: 'Search products and services',
+                hintText: 'Search products and services',
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: query.isEmpty
                     ? null
@@ -9600,7 +9851,6 @@ class _ProductsPageState extends State<ProductsPage> {
                         onPressed: _searchController.clear,
                         icon: const Icon(Icons.clear),
                       ),
-                border: const OutlineInputBorder(),
               ),
             ),
           ),
@@ -9963,55 +10213,60 @@ class _AddProductPageState extends State<AddProductPage> {
                     'Item details',
                     'Set up an item once and reuse it in your documents.',
                   ),
-                DropdownButtonFormField<String>(
-                  initialValue: _itemType,
-                  decoration: const InputDecoration(
-                    labelText: 'Item Type',
-                    border: OutlineInputBorder(),
+                LabeledField(
+                  label: 'Item Type',
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _itemType,
+                    decoration: const InputDecoration(),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'product',
+                        child: Text('Product'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'service',
+                        child: Text('Service'),
+                      ),
+                    ],
+                    onChanged: _isSaving
+                        ? null
+                        : (value) {
+                            if (value == null) return;
+                            setState(() {
+                              _itemType = value;
+                              _uqcCode = null;
+                              _selectedHsnSac = null;
+                              _hsnSacResults = [];
+                              _hsnSearchController.clear();
+                            });
+                          },
                   ),
-                  items: const [
-                    DropdownMenuItem(value: 'product', child: Text('Product')),
-                    DropdownMenuItem(value: 'service', child: Text('Service')),
-                  ],
-                  onChanged: _isSaving
-                      ? null
-                      : (value) {
-                          if (value == null) return;
-                          setState(() {
-                            _itemType = value;
-                            _uqcCode = null;
-                            _selectedHsnSac = null;
-                            _hsnSacResults = [];
-                            _hsnSearchController.clear();
-                          });
-                        },
                 ),
                 const SizedBox(height: 16),
-                TextFormField(
-                  controller: _nameController,
-                  enabled: !_isSaving,
-                  decoration: InputDecoration(
-                    labelText: _isProduct ? 'Product Name' : 'Service Name',
-                    border: const OutlineInputBorder(),
+                LabeledField(
+                  label: _isProduct ? 'Product Name' : 'Service Name',
+                  child: TextFormField(
+                    controller: _nameController,
+                    enabled: !_isSaving,
+                    decoration: InputDecoration(),
+                    validator: (value) => value == null || value.trim().isEmpty
+                        ? '${_isProduct ? 'Product' : 'Service'} name is required'
+                        : null,
                   ),
-                  validator: (value) => value == null || value.trim().isEmpty
-                      ? '${_isProduct ? 'Product' : 'Service'} name is required'
-                      : null,
                 ),
                 const SizedBox(height: 16),
-                TextFormField(
-                  controller: _sellingPriceController,
-                  enabled: !_isSaving,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
+                LabeledField(
+                  label: 'Selling price',
+                  child: TextFormField(
+                    controller: _sellingPriceController,
+                    enabled: !_isSaving,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(prefixText: '₹ '),
+                    validator: (value) =>
+                        _amountValidator(value, label: 'selling price'),
                   ),
-                  decoration: const InputDecoration(
-                    labelText: 'Selling price',
-                    prefixText: '₹ ',
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (value) =>
-                      _amountValidator(value, label: 'selling price'),
                 ),
                 if (_isProduct) ...[
                   const SizedBox(height: 16),
@@ -10033,7 +10288,7 @@ class _AddProductPageState extends State<AddProductPage> {
                     enabled: !_isSaving,
                     onChanged: _searchHsnSac,
                     decoration: InputDecoration(
-                      labelText: 'Search ${_isProduct ? 'HSN' : 'SAC'} master',
+                      hintText: 'Search ${_isProduct ? 'HSN' : 'SAC'} master',
                       helperText: 'Enter at least 3 characters to search',
                       prefixIcon: const Icon(Icons.search),
                       suffixIcon: _isSearchingHsnSac
@@ -10048,7 +10303,6 @@ class _AddProductPageState extends State<AddProductPage> {
                               ),
                             )
                           : null,
-                      border: const OutlineInputBorder(),
                     ),
                   ),
                   if (_hsnSacMasterUnavailable) ...[
@@ -10084,20 +10338,21 @@ class _AddProductPageState extends State<AddProductPage> {
                     ),
                   ],
                   const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _gstRateController,
-                    enabled: !_isSaving,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
+                  LabeledField(
+                    label: 'GST rate (%)',
+                    child: TextFormField(
+                      controller: _gstRateController,
+                      enabled: !_isSaving,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        helperText:
+                            'Enter the rate manually; it is not taken from the HSN/SAC master.',
+                      ),
+                      validator: (value) =>
+                          _taxRateValidator(value, required: true),
                     ),
-                    decoration: const InputDecoration(
-                      labelText: 'GST rate (%)',
-                      helperText:
-                          'Enter the rate manually; it is not taken from the HSN/SAC master.',
-                      border: OutlineInputBorder(),
-                    ),
-                    validator: (value) =>
-                        _taxRateValidator(value, required: true),
                   ),
                 ],
                 const SizedBox(height: 28),
@@ -10171,34 +10426,33 @@ class _UqcSelectorState extends State<_UqcSelector> {
       initialValue: widget.value,
       validator: (value) =>
           value == null ? 'Select a valid unit of measurement' : null,
-      builder: (field) => InputDecorator(
-        decoration: InputDecoration(
-          labelText: 'Unit of Measurement',
-          errorText: field.errorText,
-          border: const OutlineInputBorder(),
-        ),
-        child: InkWell(
-          onTap: widget.enabled && !_isLoading
-              ? () async {
-                  final unit = await _showPicker();
-                  if (unit == null) return;
-                  field.didChange(unit['code'] as String);
-                  widget.onChanged(unit['code'] as String);
-                }
-              : null,
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  _isLoading
-                      ? 'Loading approved units...'
-                      : selected == null
-                      ? 'Select unit'
-                      : '${selected['code']} - ${selected['description']}',
+      builder: (field) => LabeledField(
+        label: 'Unit of Measurement',
+        child: InputDecorator(
+          decoration: InputDecoration(errorText: field.errorText),
+          child: InkWell(
+            onTap: widget.enabled && !_isLoading
+                ? () async {
+                    final unit = await _showPicker();
+                    if (unit == null) return;
+                    field.didChange(unit['code'] as String);
+                    widget.onChanged(unit['code'] as String);
+                  }
+                : null,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _isLoading
+                        ? 'Loading approved units...'
+                        : selected == null
+                        ? 'Select unit'
+                        : '${selected['code']} - ${selected['description']}',
+                  ),
                 ),
-              ),
-              const Icon(Icons.arrow_drop_down),
-            ],
+                const Icon(Icons.arrow_drop_down),
+              ],
+            ),
           ),
         ),
       ),

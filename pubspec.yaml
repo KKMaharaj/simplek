@@ -81,6 +81,16 @@ flutter:
     - assets/fonts/NotoSans-Bold.ttf
     - assets/data/states_districts.json
 
+  # Inter and Fraunces (SIL Open Font License, assets/fonts/OFL-*.txt), from
+  # github.com/google/fonts. Bundled so the app looks the same offline.
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter.ttf
+    - family: Fraunces
+      fonts:
+        - asset: assets/fonts/Fraunces.ttf
+
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true

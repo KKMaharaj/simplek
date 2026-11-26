@@ -1,16 +1,9 @@
 import 'package:flutter/material.dart';
 
-/// Simplek's visual language: soft neutral canvas, white floating cards,
-/// one confident blue, pill buttons and generous rounding.
+/// Simplek's look (UI_REDESIGN_2026-11-25.md): light and colourful, three
+/// brand colours shared with the website: navy, orange and sky.
 abstract final class SimplekColors {
-  static const brand = Color(0xFF3B5BFD);
-  static const brandDeep = Color(0xFF2A3FD6);
-  static const violet = Color(0xFF7A4DF6);
-  static const success = Color(0xFF0FA968);
-  static const warning = Color(0xFFE38A0B);
-  static const danger = Color(0xFFE5484D);
-
-  // 25 Nov 2026 palette, shared with the website (UI_REDESIGN_2026-11-25.md).
+  // Brand colours.
   static const navy = Color(0xFF0B1A33);
   static const navy2 = Color(0xFF12306B);
   static const navyDeep = Color(0xFF050C1A);
@@ -27,101 +20,140 @@ abstract final class SimplekColors {
   static const slate = Color(0xFF475569);
   static const grey = Color(0xFFF1F5F9);
 
-  static const heroGradient = LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: [Color(0xFF3B5BFD), Color(0xFF6A4DF4)],
-  );
+  /// Errors only.
+  static const danger = Color(0xFFE5484D);
+
+  // Older names, kept so every screen maps onto the three colours.
+  static const brand = orange;
+  static const brandDeep = navy;
+  static const success = skyText;
+  static const warning = orangeText;
+  static const violet = navy2;
+
+  // Dark theme: navy page, navy2 cards.
+  static const darkPage = navy;
+  static const darkCard = navy2;
+  static const darkField = Color(0xFF0F2652);
+  static const darkLine = Color(0xFF2A4A86);
+  static const darkMuted = Color(0xFFB9C6DD);
 }
+
+/// Inter for everything, Fraunces 600 for screen titles. Both are variable
+/// fonts, so the weight is also set on the 'wght' axis.
+TextStyle inter(double size, FontWeight weight, Color color) => TextStyle(
+  fontFamily: 'Inter',
+  fontSize: size,
+  fontWeight: weight,
+  fontVariations: [FontVariation('wght', weight.value.toDouble())],
+  color: color,
+);
+
+TextStyle fraunces(double size, Color color) => TextStyle(
+  fontFamily: 'Fraunces',
+  fontSize: size,
+  fontWeight: FontWeight.w600,
+  fontVariations: const [FontVariation('wght', 600), FontVariation('opsz', 48)],
+  color: color,
+  letterSpacing: -0.3,
+  height: 1.15,
+);
+
+/// Shrinks a button to 98% while it is pressed (BUILD-STANDARDS 4).
+Widget _pressScale(
+  BuildContext context,
+  Set<WidgetState> states,
+  Widget? child,
+) => AnimatedScale(
+  scale: states.contains(WidgetState.pressed) ? 0.98 : 1,
+  duration: const Duration(milliseconds: 80),
+  child: child,
+);
 
 ThemeData simplekTheme(Brightness brightness) {
   final dark = brightness == Brightness.dark;
-  final background = Color(dark ? 0xFF0B1020 : 0xFFF3F5FB);
-  final surface = Color(dark ? 0xFF151B2E : 0xFFFFFFFF);
-  final field = Color(dark ? 0xFF1C2440 : 0xFFF1F4FA);
-  final primary = Color(dark ? 0xFF8EA2FF : 0xFF3B5BFD);
-  final onPrimary = Color(dark ? 0xFF0B1020 : 0xFFFFFFFF);
-  final primaryContainer = Color(dark ? 0xFF243063 : 0xFFE7ECFF);
-  final onPrimaryContainer = Color(dark ? 0xFFDCE3FF : 0xFF1F2F9E);
-  final text = Color(dark ? 0xFFEEF1FB : 0xFF0E1630);
-  final muted = Color(dark ? 0xFF9AA3C0 : 0xFF667091);
-  final border = Color(dark ? 0xFF262F4A : 0xFFE2E6F1);
+  final background = dark ? SimplekColors.darkPage : SimplekColors.page;
+  final surface = dark ? SimplekColors.darkCard : Colors.white;
+  final field = dark ? SimplekColors.darkField : Colors.white;
+  final text = dark ? Colors.white : SimplekColors.navy;
+  final muted = dark ? SimplekColors.darkMuted : SimplekColors.slate;
+  final border = dark ? SimplekColors.darkLine : SimplekColors.line;
+  const primary = SimplekColors.orange;
+  const onPrimary = SimplekColors.navy;
+  final tint = dark ? SimplekColors.navyDeep : SimplekColors.orangeTint;
+  final onTint = dark ? SimplekColors.orange : SimplekColors.orangeText;
 
   final scheme =
       ColorScheme.fromSeed(seedColor: primary, brightness: brightness).copyWith(
         primary: primary,
         onPrimary: onPrimary,
-        primaryContainer: primaryContainer,
-        onPrimaryContainer: onPrimaryContainer,
-        secondaryContainer: primaryContainer,
-        onSecondaryContainer: onPrimaryContainer,
+        primaryContainer: tint,
+        onPrimaryContainer: onTint,
+        secondary: dark ? SimplekColors.sky : SimplekColors.navy,
+        onSecondary: dark ? SimplekColors.navy : Colors.white,
+        secondaryContainer: dark
+            ? SimplekColors.navyDeep
+            : SimplekColors.skyTint,
+        onSecondaryContainer: dark ? SimplekColors.sky : SimplekColors.skyText,
+        tertiary: SimplekColors.sky,
         surface: surface,
         onSurface: text,
         onSurfaceVariant: muted,
         surfaceContainerLowest: surface,
         surfaceContainerLow: surface,
         surfaceContainer: surface,
-        surfaceContainerHigh: field,
-        surfaceContainerHighest: field,
+        surfaceContainerHigh: dark
+            ? SimplekColors.darkField
+            : SimplekColors.grey,
+        surfaceContainerHighest: dark
+            ? SimplekColors.darkField
+            : SimplekColors.grey,
         outline: muted,
         outlineVariant: border,
         error: SimplekColors.danger,
+        shadow: const Color(0x140B1A33),
       );
-  final base = ThemeData(useMaterial3: true, colorScheme: scheme);
-  const pill = StadiumBorder();
-  final buttonText = base.textTheme.labelLarge!.copyWith(
-    fontSize: 15,
-    fontWeight: FontWeight.w600,
-    letterSpacing: 0.1,
+  final base = ThemeData(
+    useMaterial3: true,
+    colorScheme: scheme,
+    fontFamily: 'Inter',
   );
+  final radius = BorderRadius.circular(12);
+  final shape = RoundedRectangleBorder(borderRadius: radius);
+  final buttonText = inter(15, FontWeight.w600, text);
   OutlineInputBorder inputBorder(Color color, [double width = 1]) =>
       OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: radius,
         borderSide: BorderSide(color: color, width: width),
+      );
+  WidgetStateProperty<BorderSide?> focusSide([BorderSide? normal]) =>
+      WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.focused)
+            ? const BorderSide(color: SimplekColors.orange, width: 2)
+            : normal,
       );
 
   final textTheme = base.textTheme
-      .apply(bodyColor: text, displayColor: text)
+      .apply(fontFamily: 'Inter', bodyColor: text, displayColor: text)
       .copyWith(
-        headlineMedium: base.textTheme.headlineMedium!.copyWith(
-          fontSize: 28,
-          fontWeight: FontWeight.w800,
-          color: text,
-          letterSpacing: -0.8,
-        ),
-        headlineSmall: base.textTheme.headlineSmall!.copyWith(
-          fontSize: 23,
-          fontWeight: FontWeight.w800,
-          color: text,
-          letterSpacing: -0.5,
-        ),
-        titleLarge: base.textTheme.titleLarge!.copyWith(
-          fontSize: 19,
-          fontWeight: FontWeight.w700,
-          color: text,
-          letterSpacing: -0.2,
-        ),
-        titleMedium: base.textTheme.titleMedium!.copyWith(
-          fontSize: 16,
-          fontWeight: FontWeight.w600,
-          color: text,
-        ),
-        bodyMedium: base.textTheme.bodyMedium!.copyWith(
-          fontSize: 14.5,
-          height: 1.4,
-          color: text,
-        ),
-        bodySmall: base.textTheme.bodySmall!.copyWith(
-          fontSize: 12.5,
-          color: muted,
-        ),
+        headlineMedium: fraunces(30, text),
+        headlineSmall: fraunces(26, text),
+        titleLarge: inter(18, FontWeight.w700, text),
+        titleMedium: inter(16, FontWeight.w600, text),
+        titleSmall: inter(14, FontWeight.w600, text),
+        bodyLarge: inter(16, FontWeight.w400, text),
+        bodyMedium: inter(15, FontWeight.w400, text).copyWith(height: 1.4),
+        bodySmall: inter(13, FontWeight.w400, muted),
         labelLarge: buttonText,
+        labelMedium: inter(13, FontWeight.w600, text),
+        labelSmall: inter(12, FontWeight.w500, muted),
       );
 
   return base.copyWith(
     scaffoldBackgroundColor: background,
     textTheme: textTheme,
-    splashFactory: InkSparkle.splashFactory,
+    splashFactory: InkRipple.splashFactory,
+    highlightColor: dark ? const Color(0x33BFE6FF) : SimplekColors.skyTint,
+    focusColor: SimplekColors.orangeTint,
     appBarTheme: AppBarTheme(
       backgroundColor: background,
       foregroundColor: text,
@@ -129,180 +161,323 @@ ThemeData simplekTheme(Brightness brightness) {
       scrolledUnderElevation: 0,
       centerTitle: false,
       elevation: 0,
-      titleTextStyle: textTheme.titleLarge!.copyWith(fontSize: 20),
+      toolbarHeight: 64,
+      titleTextStyle: fraunces(26, text),
+      actionsIconTheme: IconThemeData(color: text),
     ),
     cardTheme: CardThemeData(
       color: surface,
       surfaceTintColor: Colors.transparent,
-      elevation: dark ? 0 : 1.5,
-      shadowColor: const Color(0x141B2559),
+      elevation: 0,
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-        side: dark ? BorderSide(color: border) : BorderSide.none,
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: border),
       ),
     ),
     listTileTheme: ListTileThemeData(
       iconColor: muted,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      titleTextStyle: textTheme.titleMedium!.copyWith(fontSize: 15.5),
-      subtitleTextStyle: textTheme.bodySmall!.copyWith(fontSize: 13),
+      shape: RoundedRectangleBorder(borderRadius: radius),
+      titleTextStyle: inter(15.5, FontWeight.w600, text),
+      subtitleTextStyle: inter(13, FontWeight.w400, muted),
+      selectedColor: onTint,
+      selectedTileColor: tint,
     ),
+    // Labels sit above fields (FieldLabel); nothing floats inside the box.
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: dark ? field : surface,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      fillColor: field,
+      isDense: false,
+      floatingLabelBehavior: FloatingLabelBehavior.never,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       border: inputBorder(border),
       enabledBorder: inputBorder(border),
-      focusedBorder: inputBorder(primary, 1.8),
+      disabledBorder: inputBorder(border.withValues(alpha: 0.5)),
+      focusedBorder: inputBorder(SimplekColors.orange, 2),
       errorBorder: inputBorder(SimplekColors.danger),
-      focusedErrorBorder: inputBorder(SimplekColors.danger, 1.8),
-      labelStyle: TextStyle(color: muted),
-      floatingLabelStyle: TextStyle(
-        color: primary,
-        fontWeight: FontWeight.w600,
-      ),
-      hintStyle: TextStyle(color: muted),
+      focusedErrorBorder: inputBorder(SimplekColors.danger, 2),
+      hintStyle: inter(16, FontWeight.w400, muted),
+      labelStyle: inter(16, FontWeight.w400, muted),
+      helperStyle: inter(12.5, FontWeight.w400, muted),
+      errorStyle: inter(12.5, FontWeight.w500, SimplekColors.danger),
       prefixIconColor: muted,
       suffixIconColor: muted,
       helperMaxLines: 3,
       errorMaxLines: 3,
     ),
+    textSelectionTheme: const TextSelectionThemeData(
+      cursorColor: SimplekColors.orange,
+      selectionHandleColor: SimplekColors.orange,
+      selectionColor: Color(0x55F26B1D),
+    ),
+    // Primary: orange with navy text; pressed deepens to #C2410C with white.
     filledButtonTheme: FilledButtonThemeData(
-      style: FilledButton.styleFrom(
-        minimumSize: const Size(48, 52),
-        shape: pill,
-        textStyle: buttonText,
-        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+      style: ButtonStyle(
+        minimumSize: const WidgetStatePropertyAll(Size(48, 48)),
+        padding: const WidgetStatePropertyAll(
+          EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        ),
+        shape: WidgetStatePropertyAll(shape),
+        textStyle: WidgetStatePropertyAll(buttonText),
+        elevation: const WidgetStatePropertyAll(0),
+        backgroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.disabled)
+              ? SimplekColors.orange.withValues(alpha: 0.5)
+              : states.contains(WidgetState.pressed)
+              ? SimplekColors.orangeText
+              : states.contains(WidgetState.hovered)
+              ? const Color(0xFFE5600F)
+              : SimplekColors.orange,
+        ),
+        foregroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.disabled)
+              ? SimplekColors.navy.withValues(alpha: 0.5)
+              : states.contains(WidgetState.pressed)
+              ? Colors.white
+              : SimplekColors.navy,
+        ),
+        overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+        side: focusSide(),
+        backgroundBuilder: _pressScale,
       ),
     ),
+    // Secondary: navy with white text.
     elevatedButtonTheme: ElevatedButtonThemeData(
-      style: ElevatedButton.styleFrom(
-        minimumSize: const Size(48, 52),
-        shape: pill,
-        elevation: 0,
-        textStyle: buttonText,
+      style: ButtonStyle(
+        minimumSize: const WidgetStatePropertyAll(Size(48, 48)),
+        padding: const WidgetStatePropertyAll(
+          EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        ),
+        shape: WidgetStatePropertyAll(shape),
+        textStyle: WidgetStatePropertyAll(buttonText),
+        elevation: const WidgetStatePropertyAll(0),
+        backgroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.disabled)
+              ? SimplekColors.navy.withValues(alpha: 0.3)
+              : states.contains(WidgetState.pressed)
+              ? SimplekColors.navyDeep
+              : states.contains(WidgetState.hovered)
+              ? SimplekColors.navy2
+              : (dark ? SimplekColors.navyDeep : SimplekColors.navy),
+        ),
+        foregroundColor: const WidgetStatePropertyAll(Colors.white),
+        overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+        side: focusSide(),
+        backgroundBuilder: _pressScale,
       ),
     ),
+    // Outline: white, sky border, navy text; pressed fills with sky line.
     outlinedButtonTheme: OutlinedButtonThemeData(
-      style: OutlinedButton.styleFrom(
-        minimumSize: const Size(48, 52),
-        shape: pill,
-        foregroundColor: text,
-        side: BorderSide(color: border, width: 1.2),
-        textStyle: buttonText,
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      style: ButtonStyle(
+        minimumSize: const WidgetStatePropertyAll(Size(48, 48)),
+        padding: const WidgetStatePropertyAll(
+          EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+        ),
+        shape: WidgetStatePropertyAll(shape),
+        textStyle: WidgetStatePropertyAll(buttonText),
+        backgroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.pressed)
+              ? (dark ? SimplekColors.navyDeep : SimplekColors.skyLine)
+              : states.contains(WidgetState.hovered)
+              ? (dark ? SimplekColors.darkField : SimplekColors.skyTint)
+              : surface,
+        ),
+        foregroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.disabled)
+              ? text.withValues(alpha: 0.4)
+              : text,
+        ),
+        overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+        side: focusSide(
+          BorderSide(
+            color: dark ? SimplekColors.darkLine : SimplekColors.skyLine,
+          ),
+        ),
+        backgroundBuilder: _pressScale,
       ),
     ),
+    // Text: orange text.
     textButtonTheme: TextButtonThemeData(
-      style: TextButton.styleFrom(
-        minimumSize: const Size(48, 48),
-        shape: pill,
-        textStyle: buttonText,
+      style: ButtonStyle(
+        minimumSize: const WidgetStatePropertyAll(Size(48, 48)),
+        shape: WidgetStatePropertyAll(shape),
+        textStyle: WidgetStatePropertyAll(buttonText),
+        foregroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.disabled)
+              ? muted.withValues(alpha: 0.6)
+              : (dark ? SimplekColors.orange : SimplekColors.orangeText),
+        ),
+        overlayColor: WidgetStatePropertyAll(tint),
+        side: focusSide(),
+        backgroundBuilder: _pressScale,
       ),
     ),
     iconButtonTheme: IconButtonThemeData(
-      style: IconButton.styleFrom(minimumSize: const Size(48, 48)),
+      style: ButtonStyle(
+        minimumSize: const WidgetStatePropertyAll(Size(44, 44)),
+        foregroundColor: WidgetStatePropertyAll(text),
+        side: focusSide(),
+        backgroundBuilder: _pressScale,
+      ),
     ),
     segmentedButtonTheme: SegmentedButtonThemeData(
-      style: SegmentedButton.styleFrom(
-        backgroundColor: dark ? field : background,
-        selectedBackgroundColor: primary,
-        selectedForegroundColor: onPrimary,
-        foregroundColor: muted,
-        side: BorderSide.none,
-        shape: pill,
-        minimumSize: const Size(48, 46),
-        textStyle: const TextStyle(fontWeight: FontWeight.w600),
+      style: ButtonStyle(
+        backgroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? surface
+              : (dark ? SimplekColors.darkField : SimplekColors.grey),
+        ),
+        foregroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected) ? text : muted,
+        ),
+        side: WidgetStatePropertyAll(BorderSide(color: border)),
+        shape: WidgetStatePropertyAll(shape),
+        minimumSize: const WidgetStatePropertyAll(Size(48, 44)),
+        textStyle: WidgetStatePropertyAll(inter(14, FontWeight.w600, text)),
       ),
     ),
     chipTheme: ChipThemeData(
-      backgroundColor: dark ? field : surface,
-      selectedColor: primaryContainer,
+      color: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.selected)
+            ? (dark ? SimplekColors.orange : SimplekColors.navy)
+            : surface,
+      ),
       side: BorderSide(color: border),
-      shape: pill,
-      labelStyle: TextStyle(color: text, fontWeight: FontWeight.w500),
-      checkmarkColor: onPrimaryContainer,
+      shape: const StadiumBorder(),
+      labelStyle: inter(14, FontWeight.w600, text),
+      secondaryLabelStyle: inter(
+        14,
+        FontWeight.w600,
+        dark ? SimplekColors.navy : Colors.white,
+      ),
+      checkmarkColor: dark ? SimplekColors.navy : SimplekColors.sky,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
     ),
     navigationBarTheme: NavigationBarThemeData(
       backgroundColor: surface,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
-      height: 70,
-      indicatorColor: primaryContainer,
+      height: 72,
+      indicatorColor: tint,
+      indicatorShape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
       labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
       iconTheme: WidgetStateProperty.resolveWith(
         (states) => IconThemeData(
           color: states.contains(WidgetState.selected)
-              ? onPrimaryContainer
+              ? SimplekColors.orange
               : muted,
         ),
       ),
       labelTextStyle: WidgetStateProperty.resolveWith(
-        (states) => TextStyle(
-          fontSize: 12,
-          fontWeight: states.contains(WidgetState.selected)
-              ? FontWeight.w700
-              : FontWeight.w500,
-          color: states.contains(WidgetState.selected) ? text : muted,
-        ),
+        (states) => states.contains(WidgetState.selected)
+            ? inter(12.5, FontWeight.w700, text)
+            : inter(12.5, FontWeight.w500, muted),
       ),
     ),
     floatingActionButtonTheme: FloatingActionButtonThemeData(
-      backgroundColor: primary,
-      foregroundColor: onPrimary,
-      elevation: 4,
-      highlightElevation: 6,
-      shape: pill,
-      extendedTextStyle: buttonText,
+      backgroundColor: SimplekColors.orange,
+      foregroundColor: SimplekColors.navy,
+      elevation: 3,
+      highlightElevation: 1,
+      focusElevation: 3,
+      hoverElevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      extendedTextStyle: inter(16, FontWeight.w700, SimplekColors.navy),
+      extendedPadding: const EdgeInsets.symmetric(horizontal: 22),
     ),
     dividerTheme: DividerThemeData(color: border, thickness: 1, space: 1),
     dialogTheme: DialogThemeData(
       backgroundColor: surface,
       surfaceTintColor: Colors.transparent,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
-      titleTextStyle: textTheme.titleLarge,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      titleTextStyle: fraunces(22, text),
     ),
     bottomSheetTheme: BottomSheetThemeData(
       backgroundColor: surface,
       surfaceTintColor: Colors.transparent,
       showDragHandle: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
     ),
     popupMenuTheme: PopupMenuThemeData(
       color: surface,
       surfaceTintColor: Colors.transparent,
-      elevation: 6,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      elevation: 4,
+      shape: RoundedRectangleBorder(
+        borderRadius: radius,
+        side: BorderSide(color: border),
+      ),
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
-      backgroundColor: dark ? const Color(0xFFEEF1FB) : const Color(0xFF0E1630),
-      contentTextStyle: TextStyle(
-        color: dark ? const Color(0xFF0E1630) : Colors.white,
-        fontWeight: FontWeight.w500,
+      backgroundColor: dark ? Colors.white : SimplekColors.navy,
+      contentTextStyle: inter(
+        14.5,
+        FontWeight.w500,
+        dark ? SimplekColors.navy : Colors.white,
       ),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      actionTextColor: dark ? SimplekColors.orangeText : SimplekColors.sky,
+      shape: RoundedRectangleBorder(borderRadius: radius),
     ),
     progressIndicatorTheme: ProgressIndicatorThemeData(
-      color: primary,
-      linearTrackColor: primaryContainer,
+      color: SimplekColors.orange,
+      linearTrackColor: tint,
+      circularTrackColor: Colors.transparent,
+    ),
+    checkboxTheme: CheckboxThemeData(
+      fillColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.selected)
+            ? SimplekColors.orange
+            : Colors.transparent,
+      ),
+      checkColor: const WidgetStatePropertyAll(SimplekColors.navy),
+      side: BorderSide(color: muted, width: 1.5),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
     ),
     switchTheme: SwitchThemeData(
-      trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
+      trackColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.selected)
+            ? SimplekColors.orange
+            : (dark ? SimplekColors.darkField : SimplekColors.line),
+      ),
+      thumbColor: const WidgetStatePropertyAll(Colors.white),
+      trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
+    ),
+    radioTheme: const RadioThemeData(
+      fillColor: WidgetStatePropertyAll(SimplekColors.orange),
+    ),
+    tabBarTheme: TabBarThemeData(
+      labelColor: text,
+      unselectedLabelColor: muted,
+      indicatorColor: SimplekColors.orange,
+      labelStyle: inter(14, FontWeight.w700, text),
+    ),
+    tooltipTheme: TooltipThemeData(
+      decoration: BoxDecoration(
+        color: SimplekColors.navy,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      textStyle: inter(13, FontWeight.w500, Colors.white),
     ),
     expansionTileTheme: ExpansionTileThemeData(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       collapsedShape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
       ),
+      iconColor: text,
+      collapsedIconColor: muted,
+    ),
+    drawerTheme: DrawerThemeData(
+      backgroundColor: surface,
+      surfaceTintColor: Colors.transparent,
+      shape: const RoundedRectangleBorder(),
     ),
   );
 }
 
-/// Light / dark / automatic switch. One tap, all three choices visible.
 class ThemeModeToggle extends StatelessWidget {
   const ThemeModeToggle({
     super.key,
