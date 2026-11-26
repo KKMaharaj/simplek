@@ -344,3 +344,12 @@ session in tests).
 - Database backed up (`backups/20261126_*`), migrations `20261126000000` and
   `20261126000001` applied, `pincode-lookup` edge function deployed.
 - District list still to import from the owner's LGD download.
+
+## November 26 UI redesign (UI_REDESIGN_2026-11-25.md)
+
+- On branch `ui-redesign-2026-11-25`, version 1.4.0 (build 20261127), waiting
+  for the owner's approval before `master`. Details in `CHANGE-STATUS.md`.
+- Light navy/orange/sky look with Fraunces and Inter, labels above fields,
+  press feedback, white sidebar on web, new Home, lists, invoice view,
+  builders, payments, reports and settings; layout test at 11 widths.
+- Deploy check (CR-25 change 5) confirmed: a failing test stops the deploy.
