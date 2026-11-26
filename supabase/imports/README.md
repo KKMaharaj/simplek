@@ -28,3 +28,19 @@ Generated from `C:\Users\HP\Downloads\HSN_SAC.xlsx`.
   official description.
 
 The import CSVs do not include `updated_at`; the database default supplies it.
+
+# States and districts (LGD)
+
+| File | Rows | Target table |
+| --- | ---: | --- |
+| `lgd_states.csv` | 36 | `public.states` |
+| `lgd_districts.csv` | 790 | `public.districts` |
+
+Source: Local Government Directory, https://lgdirectory.gov.in, "Download
+Directory" → All Districts of India (XLS), downloaded by the owner on
+26 Nov 2026. Converted to CSV with Excel and imported with
+`dart run tool/import_lgd.dart <districts.csv> 2026-11-26`, which also writes
+`assets/data/states_districts.json` and
+`../migrations/20261126000002_seed_states_districts.sql`. GST state codes
+are kept in `lib/india_states.dart` (LGD codes differ for Andhra Pradesh,
+Ladakh and Dadra and Nagar Haveli and Daman and Diu).

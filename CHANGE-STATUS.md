@@ -9,7 +9,7 @@ approval of the screenshots.** Screenshots and sample PDFs:
 
 Database: backed up first (`backups/20261126_*`, 33 invoices, 30 customers,
 30 products, 4 businesses), then migrations `20261126000000` and
-`20261126000001` applied on 26 Nov after a rolled-back rehearsal and a dry
+`20261126000001` and `20261126000002` (790 districts) applied on 26 Nov after a rolled-back rehearsal and a dry
 run. All five SQL regression scripts in `supabase/tests/` pass on the live
 database. Edge function `pincode-lookup` deployed.
 
@@ -27,10 +27,10 @@ database. Edge function `pincode-lookup` deployed.
 | 8 | SKU removed from the app and PDFs (database column kept) | Done | `grep -ri sku lib/` finds nothing |
 | 9 | Optional Description (300 characters) on invoices and quotations; PDF box; copied on duplicate and conversion; searchable | Done (database tested); **Needs hand test** in the app | New invoice → Description; PDF `pdf-gst-8-items-description.pdf` |
 | 10 | Compact, aligned payment box; 8 items + 300-character description on one page; 12 items on two | Done | `pdf-gst-8-items-description.pdf`; `test/cr25_test.dart` |
-| 11 | Business address with PIN lookup, State and District; no "State (code)" line on the PDF | In progress: 36 states loaded from LGD; **district list waits for the owner's LGD download** (District is typed until then) | Onboarding / Settings address; `tool/import_lgd.dart` |
+| 11 | Business address with PIN lookup, State and District; no "State (code)" line on the PDF | Done (36 states and 790 districts from the owner's LGD download of 26 Nov, in the app and the database); **Needs hand test** of the PIN lookup in the app | Onboarding / Settings address: Karnataka → Shivamogga; `supabase/imports/README.md` |
 
 Done checklist items not yet done: hand tests on web and the phone, the
-deploy-check run on GitHub, the LGD district import, pushing to `master`
+deploy-check run on GitHub, pushing to `master`
 after approval, and checking `https://simplek.pages.dev/app/version.json`.
 
 ## UI redesign of 25 Nov 2026 (`docs/UI_REDESIGN_2026-11-25.md`)

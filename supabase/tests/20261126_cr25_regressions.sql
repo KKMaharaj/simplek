@@ -65,6 +65,16 @@ begin
      or (select gst_state_code from public.states where name = 'Andhra Pradesh') <> '37' then
     raise exception 'GST state codes are wrong';
   end if;
+  select count(*) into n from public.districts;
+  if n < 700 then raise exception 'Expected the LGD district list (790), got %', n; end if;
+  if not exists (select 1 from public.districts d join public.states s on s.id = d.state_id
+                 where s.name = 'Karnataka' and d.name = 'Shivamogga') then
+    raise exception 'Shivamogga is not listed under Karnataka';
+  end if;
+  if exists (select 1 from public.states s where not exists
+             (select 1 from public.districts d where d.state_id = s.id)) then
+    raise exception 'A state or UT has no districts';
+  end if;
   begin
     insert into public.states (lgd_code, name, gst_state_code, type) values (99, 'X', '99', 'UT');
     raise exception 'A signed-in user could add a state';
@@ -98,4 +108,4 @@ begin
 end;
 $$;
 rollback;
-select 'PASS: description saved, kept, cleared, length-checked and converted; 36 states readable, not writable, not public; old addresses copied; PIN format checked; all test writes rolled back' as result;
+select 'PASS: description saved, kept, cleared, length-checked and converted; 36 states and the LGD districts readable, not writable, not public; old addresses copied; PIN format checked; all test writes rolled back' as result;

@@ -2,13 +2,8 @@
 
 ## Replace before launch
 
-- **District list.** `assets/data/states_districts.json` has the 36 states and
-  UTs but no districts yet. The LGD district download needs a CAPTCHA, so the
-  owner downloads it: https://lgdirectory.gov.in/downloadDirectory.do →
-  Districts, all states, XLS. Then save it as CSV (Excel) and run
-  `dart run tool/import_lgd.dart <file.csv> <download date>`, which also writes
-  `supabase/migrations/20261126000002_seed_states_districts.sql`. Until then
-  the District field is typed by hand.
+- Nothing yet for this change request. (The LGD district list was imported on
+  26 Nov 2026; to refresh it later, see `supabase/imports/README.md`.)
 
 ## Needs owner's confirmation
 
