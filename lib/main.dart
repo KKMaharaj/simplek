@@ -37,6 +37,7 @@ part 'business_forms.dart';
 part 'record_picker.dart';
 part 'customer_form.dart';
 part 'document_parts.dart';
+part 'invoice_delete.dart';
 
 final invoiceChanges = ValueNotifier<int>(0);
 
@@ -5090,7 +5091,8 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
       text: phone,
       selection: TextSelection.collapsed(offset: phone.length),
     );
-    await BusinessSettings.saveProfile({
+    final before = Map<String, String>.from(BusinessSettings.profile.value);
+    final after = <String, String>{
       'ownerName': _ownerController.text.trim(),
       'name': _nameController.text.trim(),
       ..._address.toProfile(),
@@ -5110,11 +5112,18 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
       'invoicePrefix': _invoicePrefixController.text.trim().toUpperCase(),
       'quotationPrefix': _quotationPrefixController.text.trim().toUpperCase(),
       'invoiceTheme': _invoiceTheme,
-    });
+    };
+    await BusinessSettings.saveProfile(after);
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Business profile saved')));
+    final note = profileChangeShowsOnOldInvoices(before, after)
+        ? ' ${oldInvoicesNote(gst: registered)}'
+        : '';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Business profile saved.$note'),
+        duration: Duration(seconds: note.isEmpty ? 4 : 8),
+      ),
+    );
   }
 
   Future<void> _lookupIfsc(String value) async {
@@ -8619,6 +8628,7 @@ class _InvoiceHistoryPageState extends State<InvoiceHistoryPage> {
   }
 
   Future<void> _editInvoice(Map<String, dynamic> invoice) async {
+    if (!await confirmEditInvoice(context, invoice) || !mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) =>
@@ -8626,6 +8636,19 @@ class _InvoiceHistoryPageState extends State<InvoiceHistoryPage> {
       ),
     );
     await _loadInvoices();
+  }
+
+  Future<void> _deleteInvoice(Map<String, dynamic> invoice) async {
+    final id = invoice['id']?.toString();
+    if (id == null) return;
+    await deleteInvoiceWithUndo(
+      context,
+      invoiceId: id,
+      number: invoice['invoice_number']?.toString() ?? '',
+      onChanged: () {
+        if (mounted) _loadInvoices();
+      },
+    );
   }
 
   final _search = TextEditingController();
@@ -8667,6 +8690,8 @@ class _InvoiceHistoryPageState extends State<InvoiceHistoryPage> {
             _editInvoice(invoice);
           } else if (value == 'duplicate') {
             _duplicateInvoice(invoice);
+          } else if (value == 'delete') {
+            _deleteInvoice(invoice);
           }
         },
         itemBuilder: (_) => [
@@ -8674,6 +8699,7 @@ class _InvoiceHistoryPageState extends State<InvoiceHistoryPage> {
           if (!readOnly) ...const [
             PopupMenuItem(value: 'edit', child: Text('Edit invoice')),
             PopupMenuItem(value: 'duplicate', child: Text('Duplicate invoice')),
+            PopupMenuItem(value: 'delete', child: Text('Delete invoice')),
           ],
         ],
       ),
@@ -9645,6 +9671,7 @@ class InvoiceViewActions {
     this.onEdit,
     this.onDuplicate,
     this.onRecordPayment,
+    this.onDelete,
   });
   final String status;
   final double total;
@@ -9653,6 +9680,7 @@ class InvoiceViewActions {
   final Future<void> Function()? onEdit;
   final Future<void> Function()? onDuplicate;
   final Future<void> Function()? onRecordPayment;
+  final Future<void> Function()? onDelete;
   double get balance => total - paid < 0 ? 0 : total - paid;
 }
 
@@ -9818,9 +9846,27 @@ class _InvoiceViewPageState extends State<InvoiceViewPage> {
         dueDate: parseStoredDate(invoice['due_date']),
         onEdit: readOnly
             ? null
-            : () => _then(
-                InvoiceBuilderPage(sourceInvoice: invoice, editExisting: true),
-              ),
+            : () async {
+                if (!await confirmEditInvoice(context, invoice) || !mounted) {
+                  return;
+                }
+                await _then(
+                  InvoiceBuilderPage(
+                    sourceInvoice: invoice,
+                    editExisting: true,
+                  ),
+                );
+              },
+        onDelete: readOnly
+            ? null
+            : () async {
+                final deleted = await deleteInvoiceWithUndo(
+                  context,
+                  invoiceId: widget.invoiceId,
+                  number: invoice['invoice_number']?.toString() ?? '',
+                );
+                if (deleted && context.mounted) Navigator.of(context).pop();
+              },
         onDuplicate: readOnly
             ? null
             : () => _then(InvoiceBuilderPage(sourceInvoice: invoice)),
@@ -10623,6 +10669,8 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
                             await view.onRecordPayment?.call();
                           case 'download':
                             await _download();
+                          case 'delete':
+                            await view.onDelete?.call();
                         }
                       },
                       itemBuilder: (_) => [
@@ -10645,6 +10693,11 @@ class _InvoicePreviewPageState extends State<InvoicePreviewPage> {
                           const PopupMenuItem(
                             value: 'download',
                             child: Text('Download PDF'),
+                          ),
+                        if (view.onDelete != null)
+                          const PopupMenuItem(
+                            value: 'delete',
+                            child: Text('Delete invoice'),
                           ),
                       ],
                       child: Container(
@@ -11164,13 +11217,19 @@ class _AddProductPageState extends State<AddProductPage> {
         throw const _NotSavedOffline();
       }
       if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      final note =
+          _isEditing && productChangeShowsOnOldInvoices(widget.product, saved)
+          ? ' ${oldInvoicesNote(gst: isGstRegistered)}'
+          : '';
       Navigator.of(context).pop(widget.returnRecord ? saved : true);
       invoiceChanges.value++;
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         SnackBar(
           content: Text(
-            '${_isProduct ? 'Product' : 'Service'} saved successfully',
+            '${_isProduct ? 'Product' : 'Service'} saved successfully.$note',
           ),
+          duration: Duration(seconds: note.isEmpty ? 4 : 8),
         ),
       );
     } catch (e) {
