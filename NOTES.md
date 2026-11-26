@@ -87,6 +87,16 @@
   request asks for; it does make guessing which emails have accounts easier.
 - **Admin "Download business data"** makes the PDFs without the business's
   logo, signature and QR (those images stay in the business's own folder).
+- **Tally: please import one sample into TallyPrime** (Done checklist). The
+  files are in `docs/tally-samples/` (GST sales and receipts, sales only,
+  receipts only, ledger lines only, non-GST). The parts the kit never had
+  are several GST rates in one invoice, services, the mixed goods-and-
+  services invoice (`INV/2026-27/03`: stock items and a service ledger line
+  in one invoice-view voucher) and the non-GST business. If Tally refuses
+  the mixed invoice, switch "Ledger lines only" on in Tally settings.
+- **Tally: a super admin in support view can see the export but not
+  download it** (downloading marks vouchers exported, a write). Owners and
+  accountants with access can.
 
 
 - **A lawyer must review the Privacy Notice and Terms before launch**
@@ -191,3 +201,34 @@
   cases an older version's screen or PDF can then differ by a paisa (or a
   rupee at a round-off boundary) from what is stored, until it is updated.
   Invoices saved before 26 Nov keep their stored amounts.
+
+### Tally (26 Nov 2026 change request)
+
+Differences from the kit (`docs/reference/tally-integration-kit/`). The XML
+structure is the kit's exactly (tags, order, signs, GUID tags, masters
+before vouchers); only the data differs:
+- **Settings per business** (`tally_settings`), not one shared set: company
+  name in Tally, ledger names (fixed and per GST rate), units, and "Export
+  items as" (stock items, or ledger lines only).
+- **One stock item per Simplek product** (name, HSN, unit, GST rate). Two
+  products with the same name get their HSN added to the name (rule 10).
+- **Services** are ledger lines to "Service Sales GST r% Local/Interstate"
+  inside the same invoice-view voucher.
+- **One sales ledger and one tax line per GST rate.** Intra- or inter-state
+  comes from the invoice's own tax type.
+- **Non-GST business:** one "Sales" ledger, stock items with GST "Not
+  Applicable", no tax ledgers or lines, no PARTYGSTIN or PLACEOFSUPPLY.
+- **One Receipt per Simplek payment**, numbered `R-<invoice>-<n>`; the
+  method picks the ledger (cash → Cash, UPI → UPI receipts, anything else →
+  Bank).
+- **GUIDs** are `simplek-sales-<invoice id>` and `simplek-receipt-<payment
+  id>`. Never change the prefix (rule 4): re-importing updates instead of
+  duplicating only while it stays the same.
+- **Bill-wise credit period** = the invoice's own due date.
+- **Credit notes and the Discount ledger** stay in the code, dormant:
+  Simplek has neither yet.
+- **The kit's `INSERT` of old Rejwin data is left out.**
+- **"Matches Reports"** compares the export with the same invoices Reports
+  counts (not drafts, cancelled or deleted).
+- The exporter is a Supabase edge function (`tally-export`); the same file
+  runs under `node --test` for the tests, so it has no Deno imports.
