@@ -46,6 +46,7 @@ part 'invoice_delete.dart';
 part 'server_lists.dart';
 part 'privacy_pages.dart';
 part 'session.dart';
+part 'admin_pages.dart';
 
 final invoiceChanges = ValueNotifier<int>(0);
 
@@ -479,6 +480,7 @@ Future<void> main() async {
   await BusinessSettings.load();
   await AppLock.load();
   LiveSync.changes.addListener(() => invoiceChanges.value++);
+  _readAdminAddress();
   _syncTabWithUrl();
 
   runApp(const MyApp());
@@ -626,6 +628,11 @@ class _AuthGateState extends State<AuthGate> {
   /// Login fixes L3: an owner account with no business profile yet.
   bool _needsSetup = false;
 
+  /// Super admin S2/S3: a paused account, a password to change after an
+  /// admin reset.
+  bool _suspended = false;
+  bool _mustChangePassword = false;
+
   @override
   void initState() {
     super.initState();
@@ -676,6 +683,8 @@ class _AuthGateState extends State<AuthGate> {
     await AppLock.load(user?.id);
     var needsConsent = false;
     var needsSetup = false;
+    var suspended = false;
+    var mustChangePassword = false;
     DateTime? deletionCancelled;
     String? message;
     Map<String, String>? pendingSignup = await PendingSignup.load();
@@ -694,7 +703,12 @@ class _AuthGateState extends State<AuthGate> {
         PrivacyRecords.cancelPendingDeletion(),
         _hasOwnProfile(user.id),
         _sharedCount(),
+        AccountStatus.load(),
+        MyPlan.load(),
       ]);
+      final status = checks[4] as AccountStatus;
+      suspended = status.suspended;
+      mustChangePassword = status.mustChangePassword;
       needsConsent = checks[0] as bool;
       deletionCancelled = checks[1] as DateTime?;
       final hasProfile = checks[2] as bool?;
@@ -740,6 +754,8 @@ class _AuthGateState extends State<AuthGate> {
         _pendingSignup = pendingSignup;
         _needsConsent = needsConsent;
         _needsSetup = needsSetup;
+        _suspended = suspended;
+        _mustChangePassword = mustChangePassword;
         _loading = false;
       });
       if (message != null) {
@@ -793,9 +809,23 @@ class _AuthGateState extends State<AuthGate> {
         onFinished: _refresh,
       );
     }
+    if (_mustChangePassword) {
+      return ForcedPasswordPage(onDone: _refresh);
+    }
+    if (_suspended) return const SuspendedPage();
     if (_needsConsent) {
       return PrivacyUpdatePage(
         onAccepted: () => setState(() => _needsConsent = false),
+      );
+    }
+    if (kIsWeb && _openedAtAdmin) {
+      return AdminGate(
+        onExit: () {
+          setState(() => _openedAtAdmin = false);
+          UrlState.replace({
+            'tab': _tabNames[DesignSettings.destination.value]!,
+          });
+        },
       );
     }
     if (_needsSetup) {
@@ -811,7 +841,12 @@ class _AuthGateState extends State<AuthGate> {
     return AppLockGate(
       onUsePassword: () =>
           signOutEverywhereOnThisDevice(context, confirm: false),
-      child: const _ModernHome(),
+      child: const Column(
+        children: [
+          NoticeBanner(),
+          Expanded(child: _ModernHome()),
+        ],
+      ),
     );
   }
 }
@@ -1763,7 +1798,9 @@ class _ViewingBanner extends StatelessWidget {
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                'Viewing $name  •  view only',
+                BusinessAccess.supportView.value
+                    ? 'Admin support view: $name  •  view only'
+                    : 'Viewing $name  •  view only',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
@@ -2448,6 +2485,37 @@ class _SignupPageState extends State<SignupPage> {
   Future<void> _sendVerificationEmail() async {
     if (!_formKey.currentState!.validate()) return;
     final consentAt = _consentAt ?? DateTime.now();
+    final typedEmail = _emailController.text.trim().toLowerCase();
+    try {
+      final client = Supabase.instance.client;
+      final settings = await client.rpc('platform_public_settings');
+      if ((settings as Map?)?['signups_open'] == false) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'New sign-ups are paused for now. Please try again later.',
+            ),
+          ),
+        );
+        return;
+      }
+      if (await client.rpc(
+            'email_registered',
+            params: {'p_email': typedEmail},
+          ) ==
+          true) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('This email already has an account. Log in instead.'),
+          ),
+        );
+        return;
+      }
+    } catch (_) {
+      // Not deployed yet or offline: the sign-up email still decides.
+    }
     setState(() => _sendingEmail = true);
     final email = _emailController.text.trim().toLowerCase();
     try {
@@ -4063,49 +4131,59 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: ModernOverview(
-          businessName: BusinessSettings.profile.value['name'] ?? '',
-          readOnly: BusinessAccess.readOnly,
-          sales: _money(_totalSales),
-          outstanding: _money(_outstanding),
-          invoiceCount: '$_invoiceCount',
-          customerCount: '$_customerCount',
-          productCount: '$_productCount',
-          loading: _isLoadingSummary,
-          error: _summaryError,
-          recent: _recentInvoices
-              .map(
-                (row) => <String, String>{
-                  'id': row['id']?.toString() ?? '',
-                  'number': row['invoice_number']?.toString() ?? 'Invoice',
-                  'customer': row['customer_name']?.toString() ?? '',
-                  'amount': _money(Paise.parse(row['total_amount'])),
-                  'status': row['status']?.toString() ?? 'draft',
-                  'date': screenDate(parseStoredDate(row['invoice_date'])),
-                },
-              )
-              .toList(),
-          onNewInvoice: () => _openPage(context, const InvoiceBuilderPage()),
-          onNewQuotation: () =>
-              _openPage(context, const QuotationBuilderPage()),
-          onCustomer: () async {
-            await _showCustomerForm(context);
-            if (mounted) await _loadSummary();
-          },
-          onProduct: () => _openPage(context, const AddProductPage()),
-          onInvoices: () => DesignSettings.destination.value = 1,
-          onOpenInvoice: (id) =>
-              _openPage(context, InvoiceViewPage(invoiceId: id)),
-          onRefresh: _loadSummary,
-          onPayment: () => _openPage(context, const PaymentsPage()),
-          onSearch: () => _openPage(context, const GlobalSearchPage()),
-          onReports: () => _openPage(context, const ReportsPage()),
-          unpaidCount: _isLoadingSummary && _recentInvoices.isEmpty
-              ? null
-              : _unpaidCount,
-          collected: _money(_collected),
-          partlyPaidCount: _partlyPaidCount,
+        child: Column(
+          children: [
+            const PlanCard(onlyWhenNear: true),
+            Expanded(child: _overview(context)),
+          ],
         ),
+      ),
+    );
+  }
+
+  Widget _overview(BuildContext context) {
+    return Builder(
+      builder: (context) => ModernOverview(
+        businessName: BusinessSettings.profile.value['name'] ?? '',
+        readOnly: BusinessAccess.readOnly,
+        sales: _money(_totalSales),
+        outstanding: _money(_outstanding),
+        invoiceCount: '$_invoiceCount',
+        customerCount: '$_customerCount',
+        productCount: '$_productCount',
+        loading: _isLoadingSummary,
+        error: _summaryError,
+        recent: _recentInvoices
+            .map(
+              (row) => <String, String>{
+                'id': row['id']?.toString() ?? '',
+                'number': row['invoice_number']?.toString() ?? 'Invoice',
+                'customer': row['customer_name']?.toString() ?? '',
+                'amount': _money(Paise.parse(row['total_amount'])),
+                'status': row['status']?.toString() ?? 'draft',
+                'date': screenDate(parseStoredDate(row['invoice_date'])),
+              },
+            )
+            .toList(),
+        onNewInvoice: () => _openPage(context, const InvoiceBuilderPage()),
+        onNewQuotation: () => _openPage(context, const QuotationBuilderPage()),
+        onCustomer: () async {
+          await _showCustomerForm(context);
+          if (mounted) await _loadSummary();
+        },
+        onProduct: () => _openPage(context, const AddProductPage()),
+        onInvoices: () => DesignSettings.destination.value = 1,
+        onOpenInvoice: (id) =>
+            _openPage(context, InvoiceViewPage(invoiceId: id)),
+        onRefresh: _loadSummary,
+        onPayment: () => _openPage(context, const PaymentsPage()),
+        onSearch: () => _openPage(context, const GlobalSearchPage()),
+        onReports: () => _openPage(context, const ReportsPage()),
+        unpaidCount: _isLoadingSummary && _recentInvoices.isEmpty
+            ? null
+            : _unpaidCount,
+        collected: _money(_collected),
+        partlyPaidCount: _partlyPaidCount,
       ),
     );
   }
@@ -5940,6 +6018,9 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
                       ],
                     ),
                   ),
+                  const SizedBox(height: 24),
+                  const SectionLabel('Your plan'),
+                  const PlanCard(),
                   const SizedBox(height: 24),
                   const SectionLabel('Your data and privacy'),
                   RowGroup(
@@ -7816,7 +7897,12 @@ class _QuotationsPageState extends State<QuotationsPage>
       );
       await rows.refresh();
     } catch (error) {
-      if (mounted) {
+      if (mounted && isPlanLimitError(error)) {
+        await showPlanLimitDialog(
+          context,
+          error is PostgrestException ? error.message : '$error',
+        );
+      } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Unable to convert quotation: $error')),
         );
@@ -9612,6 +9698,12 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
             ),
           );
         }
+      } else if (mounted && isPlanLimitError(e)) {
+        // Super admin S4: at the plan limit while limits are enforced.
+        await showPlanLimitDialog(
+          context,
+          e is PostgrestException ? e.message : '$e',
+        );
       } else if (mounted) {
         if (e is PostgrestException && e.code == '23505') {
           setState(

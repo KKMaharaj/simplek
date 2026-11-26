@@ -82,6 +82,8 @@ final _screens = <String, Widget Function()>{
   'privacy update': () => PrivacyUpdatePage(onAccepted: () {}),
   'delete account': () => const DeleteAccountPage(),
   'sign-up': () => const SignupPage(),
+  'paused account': () => const SuspendedPage(),
+  'new password': () => ForcedPasswordPage(onDone: () async {}),
 };
 
 /// The app's real fonts, so text is measured as it is in the app (the

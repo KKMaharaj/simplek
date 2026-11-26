@@ -1039,20 +1039,31 @@ abstract final class DataExport {
     return DateTime.tryParse(preferences.getString(_lastKey(user)) ?? '');
   }
 
-  static Future<void> run({required ValueChanged<String> onProgress}) async {
+  /// Builds the ZIP of the signed-in account, or, for the super admin's
+  /// "Download business data", of [data] (from admin_export_business) drawn
+  /// with [profile]. The file goes in the caller's own private folder.
+  static Future<void> run({
+    required ValueChanged<String> onProgress,
+    Map<String, dynamic>? data,
+    Map<String, String>? profile,
+    String fileLabel = 'simplek-data',
+  }) async {
     final client = Supabase.instance.client;
     final user = client.auth.currentUser;
     if (user == null) throw StateError('Log in again to download your data.');
-    if (BusinessAccess.readOnly) {
+    final ownData = data == null;
+    if (ownData && BusinessAccess.readOnly) {
       throw StateError(
         'Switch back to your own business to download your data.',
       );
     }
-    final data = Map<String, dynamic>.from(
+    data ??= Map<String, dynamic>.from(
       await client.rpc('export_my_data') as Map,
     );
+    final pdfProfile = profile ?? BusinessSettings.profile.value;
+    final all = data;
     List<Map<String, dynamic>> rows(String key) => [
-      for (final row in (data[key] as List?) ?? const [])
+      for (final row in (all[key] as List?) ?? const [])
         Map<String, dynamic>.from(row as Map),
     ];
 
@@ -1087,11 +1098,11 @@ abstract final class DataExport {
       }
     }
 
-    final profile = data['business_profile'] is Map
+    final profileRow = data['business_profile'] is Map
         ? Map<String, dynamic>.from(data['business_profile'] as Map)
         : <String, dynamic>{};
     sheet('Business profile', [
-      for (final entry in profile.entries)
+      for (final entry in profileRow.entries)
         {'field': entry.key, 'value': entry.value},
     ]);
     final invoices = rows('invoices');
@@ -1155,7 +1166,7 @@ abstract final class DataExport {
           description: invoice['description']?.toString() ?? '',
           gstDocument: gst,
         ),
-        BusinessSettings.profile.value,
+        pdfProfile,
       );
       final number = '${invoice['invoice_number'] ?? 'invoice'}'.replaceAll(
         RegExp(r'[^A-Za-z0-9-]+'),
@@ -1172,7 +1183,7 @@ abstract final class DataExport {
     final now = DateTime.now();
     String two(int value) => value.toString().padLeft(2, '0');
     final path =
-        '${user.id}/simplek-data-${now.year}${two(now.month)}${two(now.day)}-'
+        '${user.id}/$fileLabel-${now.year}${two(now.month)}${two(now.day)}-'
         '${two(now.hour)}${two(now.minute)}.zip';
     await client.storage
         .from('data-exports')
@@ -1187,8 +1198,10 @@ abstract final class DataExport {
     final link = await client.storage
         .from('data-exports')
         .createSignedUrl(path, 24 * 60 * 60);
-    final preferences = await SharedPreferences.getInstance();
-    await preferences.setString(_lastKey(user.id), now.toIso8601String());
+    if (ownData) {
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setString(_lastKey(user.id), now.toIso8601String());
+    }
     await launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication);
   }
 }

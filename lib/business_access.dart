@@ -11,6 +11,10 @@ abstract final class BusinessAccess {
   /// True while viewing someone else's business. The server refuses changes.
   static bool get readOnly => viewing.value != null;
 
+  /// True while a super admin looks at a business in "Admin support view"
+  /// (read-only, logged on the server).
+  static final supportView = ValueNotifier(false);
+
   static const readOnlyMessage =
       'View-only access. You cannot make changes to this business.';
 
@@ -39,14 +43,20 @@ abstract final class BusinessAccess {
               ownerId: current['owner_id'].toString(),
               name: current['business_name']?.toString() ?? 'Business',
             );
+      supportView.value = current?['support'] == true;
     } catch (_) {
       // Offline or the feature is not deployed: stay as we were.
     }
   }
 
   /// Switches to a shared business, or back to your own with null.
-  static Future<void> view(String? ownerId, {String name = 'Business'}) async {
+  static Future<void> view(
+    String? ownerId, {
+    String name = 'Business',
+    bool support = false,
+  }) async {
     await _client.rpc('set_viewing_business', params: {'p_owner_id': ownerId});
+    supportView.value = ownerId != null && support;
     viewing.value = ownerId == null ? null : (ownerId: ownerId, name: name);
   }
 

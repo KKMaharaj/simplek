@@ -53,7 +53,41 @@
   code: `supabase/config.toml` only holds local-development values
   (`127.0.0.1:3000`), and the live settings are in the dashboard.
 
+- **Super admin: your admin login** (S0). After the admin migrations are
+  applied, add yourself in the Supabase SQL editor:
+  `insert into public.super_admins (user_id) select id from auth.users where email = '<your login email>';`
+  Then open `https://simplek.pages.dev/app/#/admin`, set up the two-step
+  login with an authenticator app, and the panel opens. Everyone else sees
+  "Page not found".
+- **Super admin: accounts you must create** (S5), then enter them on the
+  Integrations page: an email sender (Brevo is simplest, or Gmail /
+  Workspace / Zoho / SES SMTP on port 465), a Meta WhatsApp Cloud API app
+  (number, phone number ID, business account ID, access token), and a
+  Razorpay account (test keys first). Nothing is sent yet except the test
+  buttons. The WhatsApp and Razorpay webhook URLs shown are placeholders until
+  the change that receives their messages.
+- **Website pricing** (S4.6): `website/index.html` still says "Free: up to 30
+  invoices a month". Not changed until you confirm the wording for the
+  250-invoice free plan.
+
 ## Needs owner's confirmation
+
+- **Free plan: 250 in total or 250 a month?** (S4) It is seeded as 250 in
+  total (`lifetime`). Change it on the Plans page (Invoice limit: "Each
+  month") if you meant per month; usage then counts the current month.
+- **"Enforce plan limits" is off**: usage is counted and shown (Settings,
+  the admin pages, the 80% notice on Home) but nobody is blocked until you
+  turn it on in Platform settings.
+- **"Needs attention" lists only businesses over their limit.** The app
+  doesn't record failed GSTIN lookups yet, so "GSTIN lookup failing" can't
+  be shown.
+- **Monthly recurring revenue shows ₹0** until plan payments exist.
+- **"This email already has an account"** (S3) means the sign-up page can
+  tell anyone whether an email is registered. That is what the change
+  request asks for; it does make guessing which emails have accounts easier.
+- **Admin "Download business data"** makes the PDFs without the business's
+  logo, signature and QR (those images stay in the business's own folder).
+
 
 - **A lawyer must review the Privacy Notice and Terms before launch**
   (CR-25B B4). Both pages say "Draft: to be reviewed by a lawyer before
