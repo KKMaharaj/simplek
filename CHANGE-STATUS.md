@@ -35,9 +35,9 @@ passed and https://simplek.pages.dev/app/version.json showed 1.3.0 (build
 
 ## UI redesign of 25 Nov 2026 (`docs/UI_REDESIGN_2026-11-25.md`)
 
-Branch `ui-redesign-2026-11-25`, version 1.4.0 (build 20261127). **Not on
-`master` yet: waiting for the owner's approval of the screenshots** in
-`docs/screenshots/2026-11-26-redesign/`. Look only: no screen's data or rules
+Branch `ui-redesign-2026-11-25`, version 1.4.0 (build 20261127). The owner
+approved the screenshots in `docs/screenshots/2026-11-26-redesign/` on 26 Nov
+and it was pushed to `master` the same day. Look only: no screen's data or rules
 changed, except that Record payment now has the payment date the design
 shows (today by default).
 
@@ -50,7 +50,7 @@ shows (today by default).
 | 3 | White sidebar from 1024 px; full-width ☰ slide-in menu from 600 to 1023 px (closes with ✕, a link or Escape); bottom bar with an orange-tint pill on phones | Done; **Needs hand test** in the signed-in web app | Web at 1440, 900 and 390 px |
 | 4 | Login, Onboarding (step bar, fixed Back/Continue), Home (phone and web), Invoices, Invoice view, New invoice and quotation, picker, Quotations, Customers, New customer (bottom sheet on phones), Items, Record payment, Reports (period, tiles, weekly chart, GSTR-1 card, exports), More, Settings | Done; the lists **Need hand test** with real data | `docs/design/*.png` beside the app |
 | 5 | No overlapping text: every screen that runs without a login, 320–1920 px, text scale 1.0 and 1.3, light and dark, GST and not | Done (passes); lists that need the server are a hand test | `test/layout_overflow_test.dart` |
-| — | Version 1.4.0 (build 20261127) | Done; APK not built yet | Login screen; Settings |
+| — | Version 1.4.0 (build 20261127) | Done (APK built, not installed) | Login screen; Settings; install `build/app/outputs/flutter-apk/app-release.apk` over the old app |
 
 ## Change request of 25 Nov 2026, part B (`docs/CHANGE_REQUEST_2026-11-25_STANDARDS.md`)
 
