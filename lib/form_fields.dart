@@ -274,6 +274,7 @@ class FormWidth extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Align(
     alignment: Alignment.topCenter,
+    heightFactor: 1,
     child: ConstrainedBox(
       constraints: BoxConstraints(maxWidth: maxWidth),
       child: child,

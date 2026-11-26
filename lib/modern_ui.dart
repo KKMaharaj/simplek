@@ -693,8 +693,9 @@ class ModernOverview extends StatelessWidget {
           _header(context, wide: true),
           const SizedBox(height: 22),
           if (error != null) _errorCard(),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          IntrinsicHeight(
+            child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Expanded(
                 child: _MoneyCard(
@@ -732,6 +733,7 @@ class ModernOverview extends StatelessWidget {
                 ),
               ),
             ],
+          ),
           ),
           const SizedBox(height: 18),
           Row(

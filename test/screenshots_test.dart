@@ -15,7 +15,7 @@ import 'package:simplek/main.dart';
 import 'package:simplek/modern_ui.dart';
 
 final _enabled = Platform.environment['SIMPLEK_SCREENSHOTS'] == '1';
-const _out = 'docs/screenshots/2026-11-25';
+final _out = Platform.environment['SIMPLEK_SCREENSHOT_DIR'] ?? 'docs/screenshots/2026-11-25';
 final _boundary = GlobalKey();
 
 Future<void> _loadFonts() async {
@@ -39,6 +39,16 @@ Future<void> _loadFonts() async {
     'roboto-medium.ttf',
     'roboto-bold.ttf',
   ]);
+  // The app's own fonts (pubspec fonts are not loaded in tests by default).
+  for (final name in ['Inter', 'Fraunces']) {
+    final loader = FontLoader(name)
+      ..addFont(
+        Future.value(
+          ByteData.sublistView(File('assets/fonts/$name.ttf').readAsBytesSync()),
+        ),
+      );
+    await loader.load();
+  }
   await family('MaterialIcons', ['materialicons-regular.otf']);
 }
 
@@ -111,6 +121,53 @@ void main() {
   tearDown(() => BusinessSettings.isGstRegistered.value = false);
 
   for (final (label, size) in [('phone', phone), ('web', desktop)]) {
+    testWidgets('home ($label)', skip: !_enabled, (tester) async {
+      await _shot(
+        tester,
+        'home-$label',
+        Scaffold(
+          body: SafeArea(
+            child: ModernOverview(
+              businessName: 'Malabar Traders',
+              sales: '₹27,550.00',
+              outstanding: '₹19,800.00',
+              invoiceCount: '5',
+              customerCount: '12',
+              collected: '₹7,750.00',
+              unpaidCount: 3,
+              partlyPaidCount: 1,
+              loading: false,
+              error: null,
+              recent: const [
+                {'id': '1', 'number': 'INV/2026-27/24', 'customer': 'Principal JNNCE', 'amount': '₹10,600.21', 'status': 'sent', 'date': '19 Nov 2026'},
+                {'id': '2', 'number': 'INV/2026-27/23', 'customer': 'Kiran N P & Associates', 'amount': '₹3,276.00', 'status': 'paid', 'date': '18 Nov 2026'},
+                {'id': '3', 'number': 'INV/2026-27/22', 'customer': 'Pearlite Liners Pvt Ltd', 'amount': '₹2,205.00', 'status': 'partial', 'date': '14 Nov 2026'},
+              ],
+              onNewInvoice: () {},
+              onNewQuotation: () {},
+              onCustomer: () {},
+              onProduct: () {},
+              onPayment: () {},
+              onSearch: () {},
+              onReports: () {},
+              onInvoices: () {},
+              onRefresh: () async {},
+            ),
+          ),
+        ),
+        size: Size(size.width, label == 'phone' ? 844 : 960),
+      );
+    });
+
+    testWidgets('login ($label)', skip: !_enabled, (tester) async {
+      await _shot(
+        tester,
+        'login-$label',
+        const LoginPage(),
+        size: Size(size.width, label == 'phone' ? 844 : 960),
+      );
+    });
+
     testWidgets(
       'onboarding, GST question unanswered ($label)',
       skip: !_enabled,

@@ -1987,140 +1987,239 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    body: SafeArea(
-      child: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 440),
-            child: AutofillGroup(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(18),
-                      child: Image.asset(
-                        'assets/branding/simplek-app-icon-hd.png',
-                        width: 68,
-                        height: 68,
-                        semanticLabel: 'Simplek logo',
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    final card = AutofillGroup(
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(20, 22, 20, 18),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(22),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x120B1A33),
+              blurRadius: 16,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Welcome back', style: theme.textTheme.headlineSmall),
+              const SizedBox(height: 4),
+              Text(
+                'Log in to send your next invoice.',
+                style: theme.textTheme.bodySmall?.copyWith(fontSize: 14.5),
+              ),
+              const SizedBox(height: 16),
+              LabeledField(
+                label: 'Email',
+                child: TextFormField(
+                  controller: _emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  autofillHints: const [
+                    AutofillHints.username,
+                    AutofillHints.email,
+                  ],
+                  style: const TextStyle(fontSize: 16),
+                  decoration: const InputDecoration(
+                    hintText: 'you@business.in',
+                  ),
+                  validator: _emailValidator,
+                ),
+              ),
+              const SizedBox(height: 14),
+              LabeledField(
+                label: 'Password',
+                child: TextFormField(
+                  controller: _passwordController,
+                  obscureText: !_showPassword,
+                  autofillHints: const [AutofillHints.password],
+                  style: const TextStyle(fontSize: 16),
+                  decoration: InputDecoration(
+                    suffixIcon: IconButton(
+                      tooltip: _showPassword ? 'Hide password' : 'Show password',
+                      onPressed: () =>
+                          setState(() => _showPassword = !_showPassword),
+                      icon: Icon(
+                        _showPassword
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
                       ),
                     ),
                   ),
-                  const SizedBox(height: 24),
-                  Text(
-                    'Welcome back',
-                    style: Theme.of(context).textTheme.headlineMedium,
+                  validator: (value) => value == null || value.isEmpty
+                      ? 'Password is required'
+                      : null,
+                  onFieldSubmitted: (_) => _login(),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Pressable(
+                onTap: () => setState(() => _rememberEmail = !_rememberEmail),
+                borderRadius: BorderRadius.circular(10),
+                child: Row(
+                  children: [
+                    Checkbox(
+                      value: _rememberEmail,
+                      onChanged: (value) =>
+                          setState(() => _rememberEmail = value ?? true),
+                    ),
+                    const Flexible(child: Text('Remember my email')),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              FilledButton(
+                onPressed: _loading ? null : _login,
+                style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
+                child: _loading
+                    ? const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: SimplekColors.navy,
+                            ),
+                          ),
+                          SizedBox(width: 10),
+                          Text('Logging in…'),
+                        ],
+                      )
+                    : const Text('Log in'),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                alignment: WrapAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Text('New to Simplek?', style: theme.textTheme.bodyMedium),
+                  TextButton(
+                    onPressed: () => _openPage(context, const SignupPage()),
+                    style: TextButton.styleFrom(
+                      textStyle: inter(
+                        15,
+                        FontWeight.w700,
+                        SimplekColors.orangeText,
+                      ).copyWith(decoration: TextDecoration.underline),
+                    ),
+                    child: const Text('Create an account'),
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Log in to send invoices and track payments.',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      fontSize: 15,
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    return Scaffold(
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final panelHeight = constraints.maxHeight < 700 ? 230.0 : 300.0;
+          return SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Stack(
+                children: [
+                  // Navy top panel with the logo and tagline (Login.png).
+                  Container(
+                    height: panelHeight,
+                    width: double.infinity,
+                    color: dark ? SimplekColors.navyDeep : SimplekColors.navy,
+                    child: Stack(
+                      clipBehavior: Clip.hardEdge,
+                      children: [
+                        Positioned(
+                          right: -70,
+                          top: -80,
+                          child: Container(
+                            width: 240,
+                            height: 240,
+                            decoration: const BoxDecoration(
+                              color: SimplekColors.navy2,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          left: -50,
+                          bottom: -60,
+                          child: Container(
+                            width: 110,
+                            height: 110,
+                            decoration: const BoxDecoration(
+                              color: SimplekColors.orange,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 24),
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Form(
-                        key: _formKey,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            LabeledField(
-                              label: 'Email',
-                              child: TextFormField(
-                                controller: _emailController,
-                                keyboardType: TextInputType.emailAddress,
-                                autofillHints: const [AutofillHints.email],
-                                decoration: const InputDecoration(
-                                  prefixIcon: Icon(Icons.email_outlined),
-                                ),
-                                validator: _emailValidator,
-                              ),
-                            ),
-                            const SizedBox(height: 14),
-                            LabeledField(
-                              label: 'Password',
-                              child: TextFormField(
-                                controller: _passwordController,
-                                obscureText: !_showPassword,
-                                autofillHints: const [AutofillHints.password],
-                                decoration: InputDecoration(
-                                  prefixIcon: const Icon(Icons.lock_outline),
-                                  suffixIcon: IconButton(
-                                    onPressed: () => setState(
-                                      () => _showPassword = !_showPassword,
-                                    ),
-                                    icon: Icon(
-                                      _showPassword
-                                          ? Icons.visibility_off_outlined
-                                          : Icons.visibility_outlined,
-                                    ),
+                  SafeArea(
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 440),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 28, 16, 16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: Container(
+                                  width: 54,
+                                  height: 54,
+                                  decoration: BoxDecoration(
+                                    color: SimplekColors.orange,
+                                    borderRadius: BorderRadius.circular(15),
+                                  ),
+                                  child: const Icon(
+                                    Icons.receipt_long,
+                                    color: SimplekColors.navy,
+                                    size: 28,
+                                    semanticLabel: 'Simplek',
                                   ),
                                 ),
-                                validator: (value) =>
-                                    value == null || value.isEmpty
-                                    ? 'Password is required'
-                                    : null,
-                                onFieldSubmitted: (_) => _login(),
                               ),
-                            ),
-                            Row(
-                              children: [
-                                Checkbox(
-                                  value: _rememberEmail,
-                                  onChanged: (value) => setState(
-                                    () => _rememberEmail = value ?? true,
-                                  ),
+                              const SizedBox(height: 14),
+                              Text(
+                                'Simplek',
+                                style: fraunces(34, Colors.white),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                'Simple lekka for your business.',
+                                style: inter(
+                                  15,
+                                  FontWeight.w500,
+                                  const Color(0xFFBFE6FF),
                                 ),
-                                const Text('Remember my email'),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            FilledButton.icon(
-                              onPressed: _loading ? null : _login,
-                              icon: _loading
-                                  ? const SizedBox(
-                                      width: 18,
-                                      height: 18,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Icon(Icons.login),
-                              label: Text(
-                                _loading ? 'Logging in...' : 'Log in',
                               ),
-                            ),
-                            const SizedBox(height: 12),
-                            TextButton(
-                              onPressed: () =>
-                                  _openPage(context, const SignupPage()),
-                              child: const Text(
-                                'New to Simplek? Create an account',
-                              ),
-                            ),
-                          ],
+                              SizedBox(height: panelHeight < 300 ? 22 : 40),
+                              card,
+                              const SizedBox(height: 28),
+                              const VersionLine(),
+                            ],
+                          ),
                         ),
                       ),
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  const VersionLine(),
                 ],
               ),
             ),
-          ),
-        ),
+          );
+        },
       ),
-    ),
-  );
+    );
+  }
 }
 
 String? _emailValidator(String? value) {
@@ -2901,65 +3000,162 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
     }
   }
 
+  static const _stepNames = ['Business', 'Terms', 'Branding'];
+
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text('Set up your business'),
-      automaticallyImplyLeading: false,
-    ),
-    body: SafeArea(
-      child: FormWidth(
-        child: Stepper(
-          currentStep: _step,
-          onStepContinue: _step == 2 ? (_saving ? null : _finish) : _continue,
-          onStepCancel: _step == 0 ? null : () => setState(() => _step--),
-          controlsBuilder: (context, details) => Padding(
-            padding: const EdgeInsets.only(top: 20),
-            child: Row(
-              children: [
-                FilledButton(
-                  onPressed: details.onStepContinue,
-                  child: Text(
-                    _saving
-                        ? 'Saving...'
-                        : _step == 2
-                        ? 'Finish setup'
-                        : 'Next',
-                  ),
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final content = switch (_step) {
+      0 => _detailsStep(),
+      1 => _termsStep(),
+      _ => _brandingStep(),
+    };
+    return Scaffold(
+      body: SafeArea(
+        child: FormWidth(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                child: Row(
+                  children: [
+                    if (_step > 0) ...[
+                      SquareIconButton(
+                        icon: Icons.arrow_back,
+                        tooltip: 'Back',
+                        onPressed: () => setState(() => _step--),
+                      ),
+                      const SizedBox(width: 12),
+                    ],
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Set up your business',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.headlineSmall,
+                          ),
+                          Text(
+                            'Step ${_step + 1} of 3 · takes about a minute',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                if (_step > 0) ...[
-                  const SizedBox(width: 10),
-                  TextButton(
-                    onPressed: details.onStepCancel,
-                    child: const Text('Back'),
-                  ),
-                ],
-              ],
-            ),
+              ),
+              // Step bar: orange for done and current steps.
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+                child: Row(
+                  children: [
+                    for (var i = 0; i < 3; i++) ...[
+                      if (i > 0) const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              height: 6,
+                              decoration: BoxDecoration(
+                                color: i <= _step
+                                    ? SimplekColors.orange
+                                    : theme.colorScheme.outlineVariant,
+                                borderRadius: BorderRadius.circular(3),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${i + 1}. ${_stepNames[i]}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: inter(
+                                12,
+                                i == _step ? FontWeight.w700 : FontWeight.w500,
+                                i == _step
+                                    ? theme.colorScheme.onSurface
+                                    : theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+                  child: KeyedSubtree(key: ValueKey(_step), child: content),
+                ),
+              ),
+            ],
           ),
-          steps: [
-            Step(
-              title: const Text('Business details'),
-              isActive: _step >= 0,
-              state: _step > 0 ? StepState.complete : StepState.indexed,
-              content: _detailsStep(),
-            ),
-            Step(
-              title: const Text('Terms and conditions'),
-              isActive: _step >= 1,
-              state: _step > 1 ? StepState.complete : StepState.indexed,
-              content: _termsStep(),
-            ),
-            Step(
-              title: const Text('Branding and payments'),
-              isActive: _step >= 2,
-              content: _brandingStep(),
-            ),
-          ],
         ),
       ),
-    ),
-  );
+      bottomNavigationBar: DecoratedBox(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          border: Border(
+            top: BorderSide(color: theme.colorScheme.outlineVariant),
+          ),
+        ),
+        child: SafeArea(
+          top: false,
+          child: FormWidth(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+              child: Row(
+                children: [
+                  if (_step > 0) ...[
+                    Expanded(
+                      flex: 2,
+                      child: OutlinedButton(
+                        onPressed: _saving
+                            ? null
+                            : () => setState(() => _step--),
+                        child: const Text('Back'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                  ],
+                  Expanded(
+                    flex: 3,
+                    child: FilledButton(
+                      onPressed: _step == 2
+                          ? (_saving ? null : _finish)
+                          : _continue,
+                      child: _saving
+                          ? const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                SizedBox.square(
+                                  dimension: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: SimplekColors.navy,
+                                  ),
+                                ),
+                                SizedBox(width: 10),
+                                Text('Saving…'),
+                              ],
+                            )
+                          : Text(_step == 2 ? 'Finish setup' : 'Continue'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _detailsStep() => Form(
     key: _detailsKey,
