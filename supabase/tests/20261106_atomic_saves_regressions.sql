@@ -133,9 +133,15 @@ begin
   end if;
   if paid.payment_date <> '2088-04-02' then raise exception 'Payment date was not kept'; end if;
 
-  -- Editing a paid invoice keeps the server's paid amount
-  saved := public.save_invoice(invoice_a, header || '{"total_amount":200}', items, true);
-  if saved.paid_amount <> 118 or saved.balance_amount <> 82 or saved.status <> 'partial' then
+  -- Editing a paid invoice keeps the server's paid amount. (Since CR-25B B3
+  -- the server works the total out from the items: 2 × 100 + 18% = 236.)
+  saved := public.save_invoice(invoice_a,
+    header || '{"subtotal":200,"tax_amount":36,"igst_amount":36,"total_amount":236}',
+    jsonb_set(jsonb_set(jsonb_set(jsonb_set(jsonb_set(items,
+      '{0,quantity}', '2'), '{0,taxable_amount}', '200'), '{0,tax_amount}', '36'),
+      '{0,igst_amount}', '36'), '{0,total_amount}', '236'),
+    true);
+  if saved.paid_amount <> 118 or saved.balance_amount <> 118 or saved.status <> 'partial' then
     raise exception 'Edit miscalculated balance: % % %', saved.paid_amount, saved.balance_amount, saved.status;
   end if;
 

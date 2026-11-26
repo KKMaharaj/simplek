@@ -317,7 +317,7 @@ class _LineItemCard extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  rupees(item.total),
+                  rupees(item.total.inRupees),
                   style: inter(
                     17,
                     FontWeight.w700,
@@ -346,7 +346,7 @@ class _TotalsCard extends StatelessWidget {
     required this.total,
     required this.totalLabel,
   });
-  final double taxable, cgst, sgst, igst, exactTotal, total;
+  final Paise taxable, cgst, sgst, igst, exactTotal, total;
   final bool usesGst, intraState;
   final String totalLabel;
 
@@ -354,16 +354,16 @@ class _TotalsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final dark = theme.brightness == Brightness.dark;
-    final roundOff = roundOffFor(exactTotal);
-    Widget line(String label, double amount) => Padding(
+    final roundOff = total - exactTotal;
+    Widget line(String label, Paise amount) => Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         children: [
           Expanded(child: Text(label, style: theme.textTheme.bodyMedium)),
           Text(
-            label == 'Round off' && amount > 0
-                ? '+ ${rupees(amount)}'
-                : rupees(amount),
+            label == 'Round off' && amount > Paise.zero
+                ? '+ ${rupees(amount.inRupees)}'
+                : rupees(amount.inRupees),
             style: theme.textTheme.bodyMedium,
           ),
         ],
@@ -379,7 +379,7 @@ class _TotalsCard extends StatelessWidget {
               line('SGST', sgst),
             ] else
               line('IGST', igst),
-          if (roundOff != 0) line('Round off', roundOff),
+          if (!roundOff.isZero) line('Round off', roundOff),
           const SizedBox(height: 6),
           Divider(color: dark ? SimplekColors.darkLine : SimplekColors.skyLine),
           const SizedBox(height: 6),
@@ -396,7 +396,7 @@ class _TotalsCard extends StatelessWidget {
                 ),
               ),
               Text(
-                rupees(total),
+                rupees(total.inRupees),
                 style: inter(
                   19,
                   FontWeight.w700,

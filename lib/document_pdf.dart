@@ -552,29 +552,31 @@ class _Layout {
   }
 
   // 5. Amount in words and totals -------------------------------------------
-  /// Tax lines grouped by rate, split CGST/SGST or IGST, in paise.
+  /// Tax lines grouped by rate, split CGST/SGST or IGST, in paise. Each
+  /// rate's CGST and SGST are sums of the lines' own shares (the rounding
+  /// rule in lib/money.dart), so they match the invoice's stored amounts.
   List<(String, int)> taxLines() {
     if (!data.gstDocument) return const [];
-    final byRate = <double, int>{};
+    final tax = <double, Paise>{};
+    final cgst = <double, Paise>{};
     for (final item in data.items) {
-      if (item.tax == 0) continue;
-      byRate.update(
+      final paise = Paise.parse(item.tax);
+      if (paise.isZero) continue;
+      tax.update(item.gstRate, (sum) => sum + paise, ifAbsent: () => paise);
+      cgst.update(
         item.gstRate,
-        (paise) => paise + toPaise(item.tax),
-        ifAbsent: () => toPaise(item.tax),
+        (sum) => sum + paise.cgstShare,
+        ifAbsent: () => paise.cgstShare,
       );
     }
-    final rates = byRate.keys.toList()..sort();
+    final rates = tax.keys.toList()..sort();
     return [
       for (final rate in rates)
         if (intraState) ...[
-          ('CGST @ ${percent(rate / 2)}', (byRate[rate]! + 1) ~/ 2),
-          (
-            'SGST @ ${percent(rate / 2)}',
-            byRate[rate]! - (byRate[rate]! + 1) ~/ 2,
-          ),
+          ('CGST @ ${percent(rate / 2)}', cgst[rate]!.value),
+          ('SGST @ ${percent(rate / 2)}', (tax[rate]! - cgst[rate]!).value),
         ] else
-          ('IGST @ ${percent(rate)}', byRate[rate]!),
+          ('IGST @ ${percent(rate)}', tax[rate]!.value),
     ];
   }
 

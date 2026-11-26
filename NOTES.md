@@ -38,3 +38,38 @@
 - Screenshots for review are rendered by `test/screenshots_test.dart`
   (`SIMPLEK_SCREENSHOTS=1`) with sample data and no network; screens that need
   a login (picker lists, saved invoices) are hand tests.
+
+### Part B (CR-25B), from 27 Nov 2026
+
+- **B1 delete is a soft delete.** `invoices.deleted_at` / `deleted_by`; a
+  restrictive SELECT policy hides deleted invoices (and, through it, their
+  items) from every read the app makes, so no list, total or export can
+  forget the filter. Payments stay with the invoice and come back on Undo.
+  The hard-delete policy on invoices was dropped. A quotation whose converted
+  invoice was deleted can't be converted again ("The converted invoice no
+  longer exists"); restore the invoice instead.
+- **B1 audit log** (`audit_log`) has RLS with no policies: the app can't read
+  or write it. Only `audit_invoice` (security definer) writes, from the
+  database's own copy of the invoice, its items and payments.
+- **B3 rounding rule** (also at the top of `lib/money.dart`), all in integer
+  paise:
+  1. line taxable value = quantity × rate, rounded half-up to the paisa;
+  2. line tax = taxable value × GST % ÷ 100, rounded half-up to the paisa;
+  3. within the state: CGST = tax ÷ 2 rounded half-up, SGST = tax − CGST
+     (₹5.05 → ₹2.53 + ₹2.52); otherwise IGST = tax;
+  4. invoice subtotal, tax, CGST, SGST and IGST are sums of the line values,
+     and so are the PDF's rate-wise CGST/SGST lines;
+  5. total payable = subtotal + tax rounded to the rupee, 50 paise and above
+     up (19 Nov); the difference is Round off;
+  6. the amount in words is the printed total payable.
+  Quantity, rate and GST % are first rounded to the places the database keeps
+  (3, 2 and 2 decimals), so the app and the server start from the same
+  numbers. "Half-up" is half away from zero, as Postgres `round()` does.
+- **B3 on the server:** `save_invoice` works every amount out again. The app
+  sends `money_rule: 'paise-v1'`; then any difference is refused ("…do not
+  match the server's calculation. Update the app and try again."). Older app
+  versions don't send it: the server stores its own amounts instead of theirs,
+  so they keep working and the database always follows the rule. In rare
+  cases an older version's screen or PDF can then differ by a paisa (or a
+  rupee at a round-off boundary) from what is stored, until it is updated.
+  Invoices saved before 27 Nov keep their stored amounts.

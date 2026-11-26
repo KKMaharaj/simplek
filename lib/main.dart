@@ -4903,7 +4903,7 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
             terms: _invoiceTermsController.text,
             items: [sample],
             invoiceNumber: 'SAMPLE/2026-27/01',
-            balanceDue: roundToRupee(sample.total),
+            balanceDue: sample.total.roundedToRupee().inRupees,
             gstDocument: _gstRegistered == true,
             previewProfile: previewProfile,
           ),
@@ -5793,7 +5793,7 @@ class _PaymentsPageState extends State<PaymentsPage> {
     // so a payment whose response was lost cannot be recorded twice.
     final params = <String, dynamic>{
       'p_invoice_id': _invoiceId,
-      'p_amount': double.tryParse(_amountController.text.trim()) ?? 0,
+      'p_amount': Paise.parse(_amountController.text).inRupees,
       'p_payment_method': _method,
       'p_payment_date': _paymentDate.toIso8601String().substring(0, 10),
       'p_client_request_id': const Uuid().v4(),
@@ -5843,11 +5843,10 @@ class _PaymentsPageState extends State<PaymentsPage> {
     return null;
   }
 
-  double get _balance =>
-      (_selectedInvoice?['balance_amount'] as num?)?.toDouble() ?? 0;
+  Paise get _balance => Paise.parse(_selectedInvoice?['balance_amount']);
 
-  void _setAmount(double value) {
-    final text = value.toStringAsFixed(2);
+  void _setAmount(Paise value) {
+    final text = value.inRupees.toStringAsFixed(2);
     setState(
       () => _amountController.value = TextEditingValue(
         text: text,
@@ -5871,8 +5870,9 @@ class _PaymentsPageState extends State<PaymentsPage> {
     final theme = Theme.of(context);
     final dark = theme.brightness == Brightness.dark;
     final invoice = _selectedInvoice;
-    final amount = double.tryParse(_amountController.text.trim()) ?? 0;
-    final after = (_balance - amount).clamp(0, double.infinity).toDouble();
+    final amount = Paise.parse(_amountController.text);
+    final left = _balance - amount;
+    final after = left.isNegative ? Paise.zero : left;
     return Scaffold(
       body: SafeArea(
         child: FormWidth(
@@ -5970,7 +5970,7 @@ class _PaymentsPageState extends State<PaymentsPage> {
                                               ),
                                             ),
                                             Text(
-                                              rupees(_balance),
+                                              rupees(_balance.inRupees),
                                               style: inter(
                                                 15,
                                                 FontWeight.w700,
@@ -6038,8 +6038,8 @@ class _PaymentsPageState extends State<PaymentsPage> {
                                   ),
                                 ),
                                 validator: (value) {
-                                  final paid = double.tryParse(value ?? '');
-                                  if (paid == null || paid <= 0) {
+                                  final paid = Paise.parse(value);
+                                  if (paid <= Paise.zero) {
                                     return 'Enter the amount received';
                                   }
                                   return null;
@@ -6056,9 +6056,9 @@ class _PaymentsPageState extends State<PaymentsPage> {
                                     ),
                                     ActionChip(
                                       label: const Text('Half'),
-                                      onPressed: () => _setAmount(
-                                        (_balance * 50).round() / 100,
-                                      ),
+                                      // Half, rounded half-up to the paisa.
+                                      onPressed: () =>
+                                          _setAmount(_balance.half),
                                     ),
                                   ],
                                 ),
@@ -6129,7 +6129,7 @@ class _PaymentsPageState extends State<PaymentsPage> {
                                         ),
                                       ),
                                       Text(
-                                        rupees(after),
+                                        rupees(after.inRupees),
                                         style: inter(
                                           15,
                                           FontWeight.w700,
@@ -7884,22 +7884,24 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
     super.dispose();
   }
 
-  double get _subtotal =>
-      _items.fold(0, (sum, item) => sum + item.taxableAmount);
-  double get _tax => _items.fold(0, (sum, item) => sum + item.taxAmount);
-  double get _exactTotal => _subtotal + _tax;
+  DocumentMoney get _money => DocumentMoney([
+    for (final item in _items) item.money,
+  ], intraState: _isIntraState);
+  Paise get _subtotal => _money.subtotal;
+  Paise get _tax => _money.tax;
+  Paise get _exactTotal => _money.exactTotal;
 
   /// Rounded to the nearest rupee; the difference shows as Round off.
-  double get _total => roundToRupee(_exactTotal);
+  Paise get _total => _money.payable;
   bool get _isIntraState =>
       _placeOfSupplyController.text.trim().isEmpty ||
       sameGstState(
         _placeOfSupplyController.text,
         BusinessSettings.profile.value['businessState'] ?? '',
       );
-  double get _cgst => _isIntraState ? _tax / 2 : 0;
-  double get _sgst => _isIntraState ? _tax / 2 : 0;
-  double get _igst => _isIntraState ? 0 : _tax;
+  Paise get _cgst => _money.cgst;
+  Paise get _sgst => _money.sgst;
+  Paise get _igst => _money.igst;
   String _dbDate(DateTime value) => value.toIso8601String().substring(0, 10);
 
   Future<void> _loadExistingQuotation() async {
@@ -7997,18 +7999,20 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
         'customer_name': _customerController.text.trim(),
         'quotation_date': _dbDate(_quotationDate),
         'valid_until': _dbDate(_validUntil),
-        'subtotal': _subtotal,
-        'tax_amount': _tax,
-        'total_amount': _total,
+        'subtotal': _subtotal.inRupees,
+        'tax_amount': _tax.inRupees,
+        'total_amount': _total.inRupees,
         'terms': _termsController.text.trim(),
         'description': _descriptionController.text.trim().isEmpty
             ? null
             : _descriptionController.text.trim(),
         'place_of_supply': _usesGst ? _placeOfSupplyController.text.trim() : '',
-        'tax_type': _tax == 0 ? 'none' : (_isIntraState ? 'cgst_sgst' : 'igst'),
-        'cgst_amount': _cgst,
-        'sgst_amount': _sgst,
-        'igst_amount': _igst,
+        'tax_type': _tax.isZero
+            ? 'none'
+            : (_isIntraState ? 'cgst_sgst' : 'igst'),
+        'cgst_amount': _cgst.inRupees,
+        'sgst_amount': _sgst.inRupees,
+        'igst_amount': _igst.inRupees,
       };
       late final String number;
       late final Map<String, dynamic> quote;
@@ -8057,14 +8061,20 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
                     'item_name': item.productController.text.trim(),
                     'quantity': item.quantity,
                     'uqc_code': item.uqcCode,
-                    'unit_price': item.rate,
-                    'taxable_amount': item.taxableAmount,
+                    'unit_price': item.rate.inRupees,
+                    'taxable_amount': item.taxableAmount.inRupees,
                     'gst_rate': item.gstRate,
-                    'tax_amount': item.taxAmount,
-                    'cgst_amount': _isIntraState ? item.taxAmount / 2 : 0,
-                    'sgst_amount': _isIntraState ? item.taxAmount / 2 : 0,
-                    'igst_amount': _isIntraState ? 0 : item.taxAmount,
-                    'total_amount': item.total,
+                    'tax_amount': item.taxAmount.inRupees,
+                    'cgst_amount': item.money
+                        .cgst(intraState: _isIntraState)
+                        .inRupees,
+                    'sgst_amount': item.money
+                        .sgst(intraState: _isIntraState)
+                        .inRupees,
+                    'igst_amount': item.money
+                        .igst(intraState: _isIntraState)
+                        .inRupees,
+                    'total_amount': item.total.inRupees,
                   },
                 )
                 .toList(),
@@ -8833,12 +8843,19 @@ class InvoiceLineItem {
   String hsn = '';
 
   double get quantity => double.tryParse(quantityController.text.trim()) ?? 0;
-  double get rate => double.tryParse(rateController.text.trim()) ?? 0;
+  Paise get rate => Paise.parse(rateController.text);
   double get gstRate =>
       gstApplies ? double.tryParse(gstRateController.text.trim()) ?? 0 : 0;
-  double get taxableAmount => quantity * rate;
-  double get taxAmount => taxableAmount * gstRate / 100;
-  double get total => taxableAmount + taxAmount;
+
+  /// This line's amounts under the rounding rule in lib/money.dart.
+  LineMoney get money => LineMoney.of(
+    quantity: quantityController.text,
+    rate: rateController.text,
+    gstRate: gstApplies ? gstRateController.text : 0,
+  );
+  Paise get taxableAmount => money.taxable;
+  Paise get taxAmount => money.tax;
+  Paise get total => money.total;
 
   /// Fills HSN/SAC from a product row, or a row that embeds one.
   void readProduct(Map<String, dynamic>? product) {
@@ -8869,7 +8886,7 @@ class InvoiceLineItem {
     return [
       if (gstApplies && hsn.isNotEmpty) 'HSN/SAC $hsn',
       if (gstApplies) 'GST ${percent(gstRate)}',
-      rupees(rate),
+      rupees(rate.inRupees),
     ].join(' · ');
   }
 
@@ -8878,10 +8895,10 @@ class InvoiceLineItem {
     hsn: hsn,
     quantity: quantity,
     unit: uqcCode ?? '',
-    rate: rate,
+    rate: rate.inRupees,
     gstRate: gstRate,
-    taxable: taxableAmount,
-    tax: taxAmount,
+    taxable: taxableAmount.inRupees,
+    tax: taxAmount.inRupees,
   );
 
   void dispose() {
@@ -9142,13 +9159,15 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
     super.dispose();
   }
 
-  double get _subtotal =>
-      _items.fold(0, (sum, item) => sum + item.taxableAmount);
-  double get _taxTotal => _items.fold(0, (sum, item) => sum + item.taxAmount);
-  double get _exactTotal => _subtotal + _taxTotal;
+  DocumentMoney get _money => DocumentMoney([
+    for (final item in _items) item.money,
+  ], intraState: _isIntraState);
+  Paise get _subtotal => _money.subtotal;
+  Paise get _taxTotal => _money.tax;
+  Paise get _exactTotal => _money.exactTotal;
 
   /// Rounded to the nearest rupee; the difference shows as Round off.
-  double get _grandTotal => roundToRupee(_exactTotal);
+  Paise get _grandTotal => _money.payable;
 
   /// CGST + SGST when the place of supply is the business's state, compared
   /// by GST state code (BUILD-STANDARDS 8.1); IGST otherwise.
@@ -9158,9 +9177,9 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
         _placeOfSupplyController.text,
         BusinessSettings.profile.value['businessState'] ?? '',
       );
-  double get _cgstTotal => _isIntraState ? _taxTotal / 2 : 0;
-  double get _sgstTotal => _isIntraState ? _taxTotal / 2 : 0;
-  double get _igstTotal => _isIntraState ? 0 : _taxTotal;
+  Paise get _cgstTotal => _money.cgst;
+  Paise get _sgstTotal => _money.sgst;
+  Paise get _igstTotal => _money.igst;
 
   String _dateForDatabase(DateTime date) =>
       '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
@@ -9175,17 +9194,20 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
         : '',
     'invoice_date': _dateForDatabase(_invoiceDate),
     'due_date': _dueDate == null ? null : _dateForDatabase(_dueDate!),
-    'subtotal': _subtotal,
-    'tax_amount': _taxTotal,
-    'total_amount': _grandTotal,
+    'subtotal': _subtotal.inRupees,
+    'tax_amount': _taxTotal.inRupees,
+    'total_amount': _grandTotal.inRupees,
     'terms': _termsController.text.trim(),
     'place_of_supply': _usesGst ? _placeOfSupplyController.text.trim() : '',
-    'tax_type': _taxTotal == 0
+    'tax_type': _taxTotal.isZero
         ? 'none'
         : (_isIntraState ? 'cgst_sgst' : 'igst'),
-    'cgst_amount': _cgstTotal,
-    'sgst_amount': _sgstTotal,
-    'igst_amount': _igstTotal,
+    'cgst_amount': _cgstTotal.inRupees,
+    'sgst_amount': _sgstTotal.inRupees,
+    'igst_amount': _igstTotal.inRupees,
+    // Tells save_invoice these amounts follow the paise rounding rule, so it
+    // checks them strictly (older app versions are recalculated instead).
+    'money_rule': moneyRuleVersion,
   };
 
   List<Map<String, dynamic>> _invoiceItemsPayload() => _items
@@ -9195,14 +9217,14 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
           'item_name': item.productController.text.trim(),
           'quantity': item.quantity,
           'uqc_code': item.uqcCode,
-          'unit_price': item.rate,
-          'taxable_amount': item.taxableAmount,
+          'unit_price': item.rate.inRupees,
+          'taxable_amount': item.taxableAmount.inRupees,
           'gst_rate': item.gstRate,
-          'tax_amount': item.taxAmount,
-          'cgst_amount': _isIntraState ? item.taxAmount / 2 : 0,
-          'sgst_amount': _isIntraState ? item.taxAmount / 2 : 0,
-          'igst_amount': _isIntraState ? 0 : item.taxAmount,
-          'total_amount': item.total,
+          'tax_amount': item.taxAmount.inRupees,
+          'cgst_amount': item.money.cgst(intraState: _isIntraState).inRupees,
+          'sgst_amount': item.money.sgst(intraState: _isIntraState).inRupees,
+          'igst_amount': item.money.igst(intraState: _isIntraState).inRupees,
+          'total_amount': item.total.inRupees,
         },
       )
       .toList();
@@ -9292,15 +9314,15 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
         MaterialPageRoute<bool>(
           builder: (_) => InvoicePreviewPage(
             invoiceNumber: savedNumber,
-            balanceDue:
-                (_grandTotal -
-                        ((_isEditing
-                                ? widget.sourceInvoice!['paid_amount'] as num?
-                                : null) ??
-                            0))
-                    .clamp(0, double.infinity)
-                    .toDouble(),
-            total: _grandTotal,
+            balanceDue: () {
+              final balance =
+                  _grandTotal -
+                  Paise.parse(
+                    _isEditing ? widget.sourceInvoice!['paid_amount'] : 0,
+                  );
+              return balance.isNegative ? 0.0 : balance.inRupees;
+            }(),
+            total: _grandTotal.inRupees,
             gstDocument: _usesGst,
             customerName: _customerController.text.trim(),
             customerAddress: _customerAddress,
@@ -10139,8 +10161,10 @@ class InvoicePdfRenderer {
 
   Future<Uint8List> build(PdfPageFormat format) {
     final items = [for (final item in widget.items) item.toPdf()];
-    final exact = items.fold<double>(0, (sum, item) => sum + item.amount);
-    final total = widget.total ?? roundToRupee(exact);
+    final exact = Paise.sum(
+      items.map((item) => Paise.parse(item.taxable) + Paise.parse(item.tax)),
+    );
+    final total = widget.total ?? exact.roundedToRupee().inRupees;
     final paid = widget.paid ?? (total - widget.balanceDue).clamp(0, total);
     final gst =
         widget.gstDocument ??
