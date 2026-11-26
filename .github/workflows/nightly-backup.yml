@@ -1,0 +1,56 @@
+# The nightly server backup (CR-25B B5 part 1): the whole database and every
+# Storage file, encrypted, to the private Cloudflare R2 bucket
+# "simplek-backups". Runs every night at 02:30 IST and by hand from the
+# Actions tab ("Run workflow"). Not part of the deploy workflow.
+#
+# GitHub emails the repository owner when a run fails. The last step checks
+# the uploaded file exists and is not suspiciously small.
+#
+# Needs these repository secrets (Settings > Secrets and variables > Actions),
+# set by the owner; see NOTES.md and docs/RESTORE.md:
+#   SUPABASE_DB_URL            direct or session connection string (not the
+#                              transaction pooler), with the database password
+#   SUPABASE_URL               https://vvzaoxhygzhentywnlwr.supabase.co
+#   SUPABASE_SERVICE_ROLE_KEY  for reading the Storage files
+#   R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
+#                              an R2 token for the simplek-backups bucket only
+#   BACKUP_PASSPHRASE          the encryption passphrase; keep it offline too
+name: Nightly backup
+
+on:
+  schedule:
+    - cron: "0 21 * * *" # 21:00 UTC = 02:30 IST
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-backup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Back up, encrypt and upload
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: bash tool/backup/nightly_backup.sh

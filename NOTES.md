@@ -19,6 +19,26 @@
   email settings. Until then, check new requests in the Supabase table
   editor.
 
+- **Nightly backup (CR-25B B5): owner's steps** (Claude Code walks you
+  through them; it never creates keys or enters secrets):
+  1. Cloudflare → R2: create the private bucket  and an R2
+     API token with *Object Read & Write* on that bucket only (reading and
+     deleting are needed to keep 30 daily and 12 monthly copies).
+  2. GitHub → Settings → Secrets and variables → Actions: add
+      (Supabase → Project Settings → Database → *session*
+     connection string, with the database password), ,
+     , , ,
+      and  (names in
+     ).
+  3. **Store  safely offline** (on paper or in a password
+     manager). Without it the backups can't be opened.
+  4. Create a free **test** Supabase project for the restore test
+     (). B5 is not Done until one restore has passed.
+  Until the secrets are set, each night's run fails with "Missing …" and
+  GitHub emails you; that is expected.
+- **Encryption uses gpg (AES-256)**, the change request's second choice:
+   only reads a passphrase from a keyboard, so it can't run unattended.
+
 ## Needs owner's confirmation
 
 - **A lawyer must review the Privacy Notice and Terms before launch**
