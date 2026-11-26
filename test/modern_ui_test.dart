@@ -210,7 +210,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    await tester.tap(find.text('Save & Next'));
+    await tester.tap(find.text('Save and preview'));
     expect(saves, 1);
     final whatsapp = tester.widget<Text>(find.text('WhatsApp'));
     expect(whatsapp.maxLines, 1);

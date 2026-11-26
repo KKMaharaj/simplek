@@ -78,53 +78,71 @@ class DocumentSaveBar extends StatelessWidget {
     required this.onNext,
   });
   final bool saving;
+
+  /// Save and go back.
   final VoidCallback? onClose;
+
+  /// Save and open the preview.
   final VoidCallback? onNext;
   @override
-  Widget build(BuildContext context) => Material(
-    color: Theme.of(context).colorScheme.surface,
-    child: SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final close = OutlinedButton.icon(
-              onPressed: saving ? null : onClose,
-              icon: const Icon(Icons.check),
-              label: const Text('Save & Close'),
-            );
-            final next = FilledButton.icon(
-              onPressed: saving ? null : onNext,
-              icon: saving
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.arrow_forward),
-              label: Text(saving ? 'Saving...' : 'Save & Next'),
-            );
-            if (constraints.maxWidth < 360 ||
-                MediaQuery.textScalerOf(context).scale(14) > 20) {
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [next, const SizedBox(height: 8), close],
-              );
-            }
-            return Row(
-              children: [
-                Expanded(child: close),
-                const SizedBox(width: 12),
-                Expanded(child: next),
-              ],
-            );
-          },
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        border: Border(
+          top: BorderSide(color: theme.colorScheme.outlineVariant),
         ),
       ),
-    ),
-  );
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final close = OutlinedButton(
+                onPressed: saving ? null : onClose,
+                child: const Text('Save', maxLines: 1),
+              );
+              final next = FilledButton.icon(
+                onPressed: saving ? null : onNext,
+                icon: saving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: SimplekColors.navy,
+                        ),
+                      )
+                    : const Icon(Icons.visibility_outlined),
+                label: Text(
+                  saving ? 'Saving…' : 'Save and preview',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              );
+              if (constraints.maxWidth < 330 ||
+                  MediaQuery.textScalerOf(context).scale(14) > 20) {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [next, const SizedBox(height: 8), close],
+                );
+              }
+              return Row(
+                children: [
+                  Expanded(flex: 2, child: close),
+                  const SizedBox(width: 10),
+                  Expanded(flex: 3, child: next),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class DocumentShareBar extends StatelessWidget {
