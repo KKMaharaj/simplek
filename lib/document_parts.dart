@@ -421,3 +421,109 @@ EdgeInsets _formPadding(BuildContext context) {
   final side = ((available - 760) / 2).clamp(16, double.infinity).toDouble();
   return EdgeInsets.fromLTRB(side, 8, side, 32);
 }
+
+/// Sales by week for the period on screen: sky bars, the latest week in
+/// orange (Reports.png). Uses the invoices already loaded.
+class _WeeklySalesChart extends StatelessWidget {
+  const _WeeklySalesChart({required this.invoices});
+  final List<Map<String, dynamic>> invoices;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dated = [
+      for (final invoice in invoices)
+        if (parseStoredDate(invoice['invoice_date']) case final date?)
+          (date, (invoice['total_amount'] as num?)?.toDouble() ?? 0),
+    ];
+    if (dated.isEmpty) return const SizedBox.shrink();
+    final latest = dated
+        .map((entry) => entry.$1)
+        .reduce((a, b) => a.isAfter(b) ? a : b);
+    final end = DateUtils.dateOnly(latest);
+    // Four weeks ending on the latest invoice date.
+    final weeks = [
+      for (var i = 3; i >= 0; i--)
+        (
+          start: end.subtract(Duration(days: i * 7 + 6)),
+          end: end.subtract(Duration(days: i * 7)),
+        ),
+    ];
+    final totals = [
+      for (final week in weeks)
+        dated
+            .where(
+              (entry) =>
+                  !DateUtils.dateOnly(entry.$1).isBefore(week.start) &&
+                  !DateUtils.dateOnly(entry.$1).isAfter(week.end),
+            )
+            .fold<double>(0, (sum, entry) => sum + entry.$2),
+    ];
+    final highest = totals.reduce((a, b) => a > b ? a : b);
+    String label(({DateTime start, DateTime end}) week) =>
+        '${week.start.day}–${week.end.day} ${screenDate(week.end).split(' ')[1]}';
+    return SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Sales by week',
+                  style: theme.textTheme.titleMedium,
+                ),
+              ),
+              Text('last 4 weeks', style: theme.textTheme.bodySmall),
+            ],
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            height: 140,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                for (var i = 0; i < 4; i++) ...[
+                  if (i > 0) const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        Tooltip(
+                          message: rupees(totals[i]),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 300),
+                            height: highest == 0
+                                ? 4
+                                : (100 * totals[i] / highest).clamp(4, 100),
+                            decoration: BoxDecoration(
+                              color: i == 3
+                                  ? SimplekColors.orange
+                                  : (totals[i] == highest
+                                        ? SimplekColors.sky
+                                        : SimplekColors.skyTint),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            label(weeks[i]),
+                            maxLines: 1,
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

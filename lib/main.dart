@@ -4078,8 +4078,9 @@ class _CustomersPageState extends State<CustomersPage> {
         children: const [SkeletonRows()],
       );
     }
-    if (_errorMessage != null)
+    if (_errorMessage != null) {
       return _loadError(_errorMessage!, _loadCustomers);
+    }
 
     final customers = _visibleCustomers;
     final hasSearch = _searchController.text.trim().isNotEmpty;
@@ -6772,460 +6773,559 @@ ${_gst ? '<PARTYGSTIN>${_xml(invoice['customer_gstin'])}</PARTYGSTIN>\n<PLACEOFS
       0,
       (sum, row) => sum + _amount(row['igst_amount']),
     );
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Reports'),
-        actions: [
-          PopupMenuButton<String>(
-            tooltip: 'Export report',
-            onSelected: _export,
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'pdf', child: Text('Export PDF')),
-              PopupMenuItem(value: 'xlsx', child: Text('Export Excel')),
-              PopupMenuItem(value: 'csv', child: Text('Export CSV')),
-              PopupMenuItem(value: 'xml', child: Text('Export TallyPrime XML')),
-            ],
-            icon: const Icon(Icons.download_outlined),
-          ),
-          IconButton(
-            tooltip: 'Select report period',
-            onPressed: _loading ? null : _selectReportPeriod,
-            icon: Icon(
-              _reportPeriod == null
-                  ? Icons.date_range_outlined
-                  : Icons.event_available,
-            ),
-          ),
-          IconButton(
-            onPressed: _loading ? null : _load,
-            icon: const Icon(Icons.refresh),
-          ),
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    Widget exportButton(String format, String label, {bool strong = false}) {
+      final child = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.download_outlined, size: 20),
+          const SizedBox(width: 6),
+          Flexible(child: Text(label, maxLines: 1)),
         ],
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.cloud_off_outlined, size: 48),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Unable to load reports:\n$_error',
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 12),
-                    FilledButton(
-                      onPressed: _load,
-                      child: const Text('Try again'),
+      );
+      return Expanded(
+        child: strong
+            ? ElevatedButton(onPressed: () => _export(format), child: child)
+            : OutlinedButton(onPressed: () => _export(format), child: child),
+      );
+    }
+
+    return Scaffold(
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _PageHeader(
+              title: 'Reports',
+              actions: [
+                PopupMenuButton<String>(
+                  tooltip: 'Export report',
+                  onSelected: _export,
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'pdf', child: Text('Export PDF')),
+                    PopupMenuItem(value: 'xlsx', child: Text('Export Excel')),
+                    PopupMenuItem(value: 'csv', child: Text('Export CSV')),
+                    PopupMenuItem(
+                      value: 'xml',
+                      child: Text('Export TallyPrime XML'),
                     ),
                   ],
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: theme.colorScheme.outlineVariant,
+                      ),
+                    ),
+                    child: const Icon(Icons.download_outlined),
+                  ),
                 ),
-              ),
-            )
-          : RefreshIndicator(
-              onRefresh: _load,
-              child: ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  Card(
-                    child: ListTile(
-                      leading: const Icon(Icons.calendar_month_outlined),
-                      title: Text(
-                        _reportPeriod == null
-                            ? 'All invoice dates'
-                            : '${_shortDate(_reportPeriod!.start)} to ${_shortDate(_reportPeriod!.end)}',
-                      ),
-                      subtitle: const Text(
-                        'This period applies to every report below.',
-                      ),
-                      trailing: _reportPeriod == null
-                          ? TextButton(
-                              onPressed: _selectReportPeriod,
-                              child: const Text('Select'),
-                            )
-                          : IconButton(
-                              tooltip: 'Clear report period',
-                              onPressed: () =>
-                                  setState(() => _reportPeriod = null),
-                              icon: const Icon(Icons.close),
-                            ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Billing summary',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _metric(
-                          'Sales',
-                          _money(sales),
-                          Icons.trending_up,
-                          Colors.green,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _metric(
-                          'Collected',
-                          _money(collected),
-                          Icons.payments_outlined,
-                          Colors.indigo,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _metric(
-                          'Outstanding',
-                          _money(outstanding),
-                          Icons.account_balance_wallet_outlined,
-                          Colors.orange,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _metric(
-                          'Invoices',
-                          active.length.toString(),
-                          Icons.receipt_long_outlined,
-                          Colors.purple,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  Text(
-                    'Payment status',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 12),
-                  Card(
-                    child: Padding(
+              ],
+            ),
+            Expanded(
+              child: _loading && _invoices.isEmpty
+                  ? ListView(
                       padding: const EdgeInsets.all(16),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: _statusMetric('Paid', paid, Colors.green),
-                          ),
-                          Container(
-                            height: 42,
-                            width: 1,
-                            color: Colors.grey.shade300,
-                          ),
-                          Expanded(
-                            child: _statusMetric(
-                              'Pending',
-                              pending,
-                              Colors.orange,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  if (_gst) ...[
-                    const SizedBox(height: 24),
-                    Text(
-                      'GSTR-1 filing tables',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    const SizedBox(height: 8),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _metric(
-                            'B2B invoices',
-                            b2bInvoices.length.toString(),
-                            Icons.business_outlined,
-                            Colors.indigo,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _metric(
-                            'B2C invoices',
-                            b2cInvoices.length.toString(),
-                            Icons.person_outline,
-                            Colors.teal,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Card(
-                      color: invalidInvoices.isEmpty
-                          ? Colors.green.shade50
-                          : Colors.orange.shade50,
-                      child: ListTile(
-                        leading: Icon(
-                          invalidInvoices.isEmpty
-                              ? Icons.verified_outlined
-                              : Icons.warning_amber_outlined,
-                          color: invalidInvoices.isEmpty
-                              ? Colors.green.shade700
-                              : Colors.orange.shade800,
-                        ),
-                        title: Text(
-                          invalidInvoices.isEmpty
-                              ? 'GSTR-1 validation passed'
-                              : '${invalidInvoices.length} invoice(s) need attention',
-                        ),
-                        subtitle: Text(
-                          filingInvoices.isEmpty
-                              ? 'No non-draft invoices in this period.'
-                              : 'Draft invoices are excluded from filing tables.',
-                        ),
-                      ),
-                    ),
-                    if (invalidInvoices.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      ...invalidInvoices.map(
-                        (entry) => Card(
-                          child: ListTile(
-                            leading: const Icon(Icons.error_outline),
-                            title: Text(
-                              entry.invoice['invoice_number']?.toString() ??
-                                  'Invoice',
-                            ),
-                            subtitle: Text(entry.issues.join(' • ')),
-                          ),
-                        ),
-                      ),
-                    ],
-                    Card(
-                      child: ExpansionTile(
-                        title: Text('B2B supplies (${b2bInvoices.length})'),
-                        subtitle: const Text('Registered customers with GSTIN'),
-                        children: b2bInvoices.isEmpty
-                            ? const [
-                                ListTile(
-                                  title: Text(
-                                    'No B2B invoices in this period.',
-                                  ),
-                                ),
-                              ]
-                            : b2bInvoices
-                                  .map(
-                                    (invoice) => ListTile(
-                                      title: Text(
-                                        invoice['invoice_number']?.toString() ??
-                                            'Invoice',
-                                      ),
-                                      subtitle: Text(
-                                        '${invoice['customer_gstin']} • ${invoice['customer_name']}',
-                                      ),
-                                      trailing: Text(
-                                        _money(
-                                          _amount(invoice['total_amount']),
-                                        ),
-                                      ),
-                                    ),
-                                  )
-                                  .toList(),
-                      ),
-                    ),
-                    Card(
-                      child: ExpansionTile(
-                        title: Text('B2C supplies (${b2cInvoices.length})'),
-                        subtitle: const Text('Consumers without GSTIN'),
-                        children: b2cInvoices.isEmpty
-                            ? const [
-                                ListTile(
-                                  title: Text(
-                                    'No B2C invoices in this period.',
-                                  ),
-                                ),
-                              ]
-                            : b2cInvoices
-                                  .map(
-                                    (invoice) => ListTile(
-                                      title: Text(
-                                        invoice['invoice_number']?.toString() ??
-                                            'Invoice',
-                                      ),
-                                      subtitle: Text(
-                                        invoice['customer_name']?.toString() ??
-                                            'Customer',
-                                      ),
-                                      trailing: Text(
-                                        _money(
-                                          _amount(invoice['total_amount']),
-                                        ),
-                                      ),
-                                    ),
-                                  )
-                                  .toList(),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 24),
-                  Text(
-                    'Recent invoices',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 8),
-                  if (active.isEmpty)
-                    const Card(
-                      child: Padding(
-                        padding: EdgeInsets.all(20),
-                        child: Text('No invoice data is available yet.'),
-                      ),
+                      children: const [SkeletonRows(count: 4)],
                     )
-                  else
-                    Card(
-                      child: Column(
-                        children: active
-                            .take(10)
-                            .map(
-                              (invoice) => ListTile(
+                  : _error != null
+                  ? _loadError('Unable to load reports:\n$_error', _load)
+                  : RefreshIndicator(
+                      onRefresh: _load,
+                      child: ListView(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Pressable(
+                                  onTap: _selectReportPeriod,
+                                  color: theme.colorScheme.surface,
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Container(
+                                    height: 48,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 14,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: dark
+                                            ? SimplekColors.darkLine
+                                            : SimplekColors.skyLine,
+                                      ),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          Icons.calendar_month_outlined,
+                                          color: dark
+                                              ? SimplekColors.sky
+                                              : SimplekColors.skyText,
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: Text(
+                                            _reportPeriod == null
+                                                ? 'All invoice dates'
+                                                : '${screenDate(_reportPeriod!.start)} – ${screenDate(_reportPeriod!.end)}',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: inter(
+                                              15,
+                                              FontWeight.w600,
+                                              theme.colorScheme.onSurface,
+                                            ),
+                                          ),
+                                        ),
+                                        const Icon(Icons.expand_more),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              if (_reportPeriod != null) ...[
+                                const SizedBox(width: 8),
+                                SquareIconButton(
+                                  icon: Icons.close,
+                                  tooltip: 'Show all dates',
+                                  onPressed: () =>
+                                      setState(() => _reportPeriod = null),
+                                ),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: StatTile(
+                                  label: 'Sales',
+                                  value: _money(sales),
+                                  filled: true,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: StatTile(
+                                  label: 'Collected',
+                                  value: _money(collected),
+                                  tone: TileTone.sky,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: StatTile(
+                                  label: 'Outstanding',
+                                  value: _money(outstanding),
+                                  tone: TileTone.orange,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: StatTile(
+                                  label: 'Invoices',
+                                  value: '${active.length}',
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          _WeeklySalesChart(invoices: active),
+                          if (_gst) ...[
+                            const SizedBox(height: 12),
+                            SectionCard(
+                              padding: const EdgeInsets.all(14),
+                              child: Row(
+                                children: [
+                                  IconTile(
+                                    invalidInvoices.isEmpty
+                                        ? Icons.check
+                                        : Icons.warning_amber_rounded,
+                                    tone: invalidInvoices.isEmpty
+                                        ? TileTone.sky
+                                        : TileTone.orange,
+                                    size: 42,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          invalidInvoices.isEmpty
+                                              ? 'GSTR-1 is ready'
+                                              : 'GSTR-1 needs attention',
+                                          style: theme.textTheme.titleMedium,
+                                        ),
+                                        Text(
+                                          'B2B ${b2bInvoices.length} invoices · B2C ${b2cInvoices.length} invoices · '
+                                          '${invalidInvoices.isEmpty ? 'no errors' : '${invalidInvoices.length} to fix'}',
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: theme.textTheme.bodySmall,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              exportButton('pdf', 'PDF'),
+                              const SizedBox(width: 8),
+                              exportButton('xlsx', 'Excel'),
+                              const SizedBox(width: 8),
+                              exportButton('xml', 'Tally', strong: true),
+                            ],
+                          ),
+                          const SizedBox(height: 24),
+                          Text(
+                            'Payment status',
+                            style: theme.textTheme.titleLarge,
+                          ),
+                          const SizedBox(height: 12),
+                          Card(
+                            child: Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: _statusMetric(
+                                      'Paid',
+                                      paid,
+                                      Colors.green,
+                                    ),
+                                  ),
+                                  Container(
+                                    height: 42,
+                                    width: 1,
+                                    color: Colors.grey.shade300,
+                                  ),
+                                  Expanded(
+                                    child: _statusMetric(
+                                      'Pending',
+                                      pending,
+                                      Colors.orange,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          if (_gst) ...[
+                            const SizedBox(height: 24),
+                            Text(
+                              'GSTR-1 filing tables',
+                              style: Theme.of(context).textTheme.titleLarge,
+                            ),
+                            const SizedBox(height: 8),
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _metric(
+                                    'B2B invoices',
+                                    b2bInvoices.length.toString(),
+                                    Icons.business_outlined,
+                                    Colors.indigo,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: _metric(
+                                    'B2C invoices',
+                                    b2cInvoices.length.toString(),
+                                    Icons.person_outline,
+                                    Colors.teal,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            Card(
+                              color: invalidInvoices.isEmpty
+                                  ? Colors.green.shade50
+                                  : Colors.orange.shade50,
+                              child: ListTile(
+                                leading: Icon(
+                                  invalidInvoices.isEmpty
+                                      ? Icons.verified_outlined
+                                      : Icons.warning_amber_outlined,
+                                  color: invalidInvoices.isEmpty
+                                      ? Colors.green.shade700
+                                      : Colors.orange.shade800,
+                                ),
                                 title: Text(
-                                  invoice['invoice_number']?.toString() ??
-                                      'Invoice',
+                                  invalidInvoices.isEmpty
+                                      ? 'GSTR-1 validation passed'
+                                      : '${invalidInvoices.length} invoice(s) need attention',
                                 ),
                                 subtitle: Text(
-                                  '${invoice['customer_name'] ?? ''} • ${(invoice['status'] ?? 'draft').toString().toUpperCase()}',
+                                  filingInvoices.isEmpty
+                                      ? 'No non-draft invoices in this period.'
+                                      : 'Draft invoices are excluded from filing tables.',
+                                ),
+                              ),
+                            ),
+                            if (invalidInvoices.isNotEmpty) ...[
+                              const SizedBox(height: 8),
+                              ...invalidInvoices.map(
+                                (entry) => Card(
+                                  child: ListTile(
+                                    leading: const Icon(Icons.error_outline),
+                                    title: Text(
+                                      entry.invoice['invoice_number']
+                                              ?.toString() ??
+                                          'Invoice',
+                                    ),
+                                    subtitle: Text(entry.issues.join(' • ')),
+                                  ),
+                                ),
+                              ),
+                            ],
+                            Card(
+                              child: ExpansionTile(
+                                title: Text(
+                                  'B2B supplies (${b2bInvoices.length})',
+                                ),
+                                subtitle: const Text(
+                                  'Registered customers with GSTIN',
+                                ),
+                                children: b2bInvoices.isEmpty
+                                    ? const [
+                                        ListTile(
+                                          title: Text(
+                                            'No B2B invoices in this period.',
+                                          ),
+                                        ),
+                                      ]
+                                    : b2bInvoices
+                                          .map(
+                                            (invoice) => ListTile(
+                                              title: Text(
+                                                invoice['invoice_number']
+                                                        ?.toString() ??
+                                                    'Invoice',
+                                              ),
+                                              subtitle: Text(
+                                                '${invoice['customer_gstin']} • ${invoice['customer_name']}',
+                                              ),
+                                              trailing: Text(
+                                                _money(
+                                                  _amount(
+                                                    invoice['total_amount'],
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          )
+                                          .toList(),
+                              ),
+                            ),
+                            Card(
+                              child: ExpansionTile(
+                                title: Text(
+                                  'B2C supplies (${b2cInvoices.length})',
+                                ),
+                                subtitle: const Text('Consumers without GSTIN'),
+                                children: b2cInvoices.isEmpty
+                                    ? const [
+                                        ListTile(
+                                          title: Text(
+                                            'No B2C invoices in this period.',
+                                          ),
+                                        ),
+                                      ]
+                                    : b2cInvoices
+                                          .map(
+                                            (invoice) => ListTile(
+                                              title: Text(
+                                                invoice['invoice_number']
+                                                        ?.toString() ??
+                                                    'Invoice',
+                                              ),
+                                              subtitle: Text(
+                                                invoice['customer_name']
+                                                        ?.toString() ??
+                                                    'Customer',
+                                              ),
+                                              trailing: Text(
+                                                _money(
+                                                  _amount(
+                                                    invoice['total_amount'],
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          )
+                                          .toList(),
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 24),
+                          Text(
+                            'Recent invoices',
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                          const SizedBox(height: 8),
+                          if (active.isEmpty)
+                            const Card(
+                              child: Padding(
+                                padding: EdgeInsets.all(20),
+                                child: Text(
+                                  'No invoice data is available yet.',
+                                ),
+                              ),
+                            )
+                          else
+                            Card(
+                              child: Column(
+                                children: active
+                                    .take(10)
+                                    .map(
+                                      (invoice) => ListTile(
+                                        title: Text(
+                                          invoice['invoice_number']
+                                                  ?.toString() ??
+                                              'Invoice',
+                                        ),
+                                        subtitle: Text(
+                                          '${invoice['customer_name'] ?? ''} • ${(invoice['status'] ?? 'draft').toString().toUpperCase()}',
+                                        ),
+                                        trailing: Text(
+                                          _money(
+                                            _amount(invoice['total_amount']),
+                                          ),
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    )
+                                    .toList(),
+                              ),
+                            ),
+                          if (_gst) ...[
+                            const SizedBox(height: 24),
+                            Text(
+                              'GSTR-1 summary',
+                              style: Theme.of(context).textTheme.titleLarge,
+                            ),
+                            const SizedBox(height: 8),
+                            Card(
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Column(
+                                  children: [
+                                    _reportLine('Taxable value', filingTaxable),
+                                    _reportLine('CGST', filingCgst),
+                                    _reportLine('SGST', filingSgst),
+                                    _reportLine('IGST', filingIgst),
+                                    const Divider(),
+                                    _reportLine(
+                                      'Total GST',
+                                      filingCgst + filingSgst + filingIgst,
+                                      bold: true,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 24),
+                          Text(
+                            'Customer-wise report',
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                          const SizedBox(height: 8),
+                          if (customers.isEmpty)
+                            const Card(
+                              child: Padding(
+                                padding: EdgeInsets.all(16),
+                                child: Text('No customer sales yet.'),
+                              ),
+                            ),
+                          ...customers.map(
+                            (entry) => Card(
+                              child: ListTile(
+                                title: Text(entry.key),
+                                subtitle: Text(
+                                  [
+                                    '${entry.value['count']!.toInt()} invoices',
+                                    if (_gst)
+                                      'Tax ${_money(entry.value['tax']!)}',
+                                    'Due ${_money(entry.value['outstanding']!)}',
+                                  ].join(' • '),
                                 ),
                                 trailing: Text(
-                                  _money(_amount(invoice['total_amount'])),
+                                  _money(entry.value['sales']!),
                                   style: const TextStyle(
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
                               ),
-                            )
-                            .toList(),
-                      ),
-                    ),
-                  if (_gst) ...[
-                    const SizedBox(height: 24),
-                    Text(
-                      'GSTR-1 summary',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    const SizedBox(height: 8),
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          children: [
-                            _reportLine('Taxable value', filingTaxable),
-                            _reportLine('CGST', filingCgst),
-                            _reportLine('SGST', filingSgst),
-                            _reportLine('IGST', filingIgst),
-                            const Divider(),
-                            _reportLine(
-                              'Total GST',
-                              filingCgst + filingSgst + filingIgst,
-                              bold: true,
                             ),
-                          ],
-                        ),
+                          ),
+                          const SizedBox(height: 24),
+                          Text(
+                            'Item-wise report',
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                          const SizedBox(height: 8),
+                          if (items.isEmpty)
+                            const Card(
+                              child: Padding(
+                                padding: EdgeInsets.all(16),
+                                child: Text('No item sales yet.'),
+                              ),
+                            ),
+                          ...items.map(
+                            (entry) => Card(
+                              child: ListTile(
+                                title: Text(entry.key),
+                                subtitle: Text(
+                                  [
+                                    'Qty ${plainQuantity(entry.value['quantity']!)}',
+                                    if (_gst)
+                                      'Taxable ${_money(entry.value['taxable']!)}',
+                                    if (_gst)
+                                      'Tax ${_money(entry.value['tax']!)}',
+                                  ].join(' • '),
+                                ),
+                                trailing: Text(
+                                  _money(entry.value['sales']!),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ],
-                  const SizedBox(height: 24),
-                  Text(
-                    'Customer-wise report',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 8),
-                  if (customers.isEmpty)
-                    const Card(
-                      child: Padding(
-                        padding: EdgeInsets.all(16),
-                        child: Text('No customer sales yet.'),
-                      ),
-                    ),
-                  ...customers.map(
-                    (entry) => Card(
-                      child: ListTile(
-                        title: Text(entry.key),
-                        subtitle: Text(
-                          [
-                            '${entry.value['count']!.toInt()} invoices',
-                            if (_gst) 'Tax ${_money(entry.value['tax']!)}',
-                            'Due ${_money(entry.value['outstanding']!)}',
-                          ].join(' • '),
-                        ),
-                        trailing: Text(
-                          _money(entry.value['sales']!),
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  Text(
-                    'Item-wise report',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 8),
-                  if (items.isEmpty)
-                    const Card(
-                      child: Padding(
-                        padding: EdgeInsets.all(16),
-                        child: Text('No item sales yet.'),
-                      ),
-                    ),
-                  ...items.map(
-                    (entry) => Card(
-                      child: ListTile(
-                        title: Text(entry.key),
-                        subtitle: Text(
-                          [
-                            'Qty ${plainQuantity(entry.value['quantity']!)}',
-                            if (_gst)
-                              'Taxable ${_money(entry.value['taxable']!)}',
-                            if (_gst) 'Tax ${_money(entry.value['tax']!)}',
-                          ].join(' • '),
-                        ),
-                        trailing: Text(
-                          _money(entry.value['sales']!),
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
             ),
+          ],
+        ),
+      ),
     );
   }
 
   Widget _metric(String label, String value, IconData icon, Color color) =>
-      Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(icon, color: color),
-              const SizedBox(height: 12),
-              Text(label, style: TextStyle(color: Colors.grey.shade700)),
-              const SizedBox(height: 4),
-              Text(
-                value,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 18,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
+      StatTile(label: label, value: value, tone: TileTone.sky);
   Widget _statusMetric(String label, int value, Color color) => Column(
     children: [
       Text(
