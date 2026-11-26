@@ -37,7 +37,11 @@ passed and https://simplek.pages.dev/app/version.json showed 1.3.0 (build
 
 Branch `ui-redesign-2026-11-25`, version 1.4.0 (build 20261127). The owner
 approved the screenshots in `docs/screenshots/2026-11-26-redesign/` on 26 Nov
-and it was pushed to `master` the same day. Look only: no screen's data or rules
+and it was pushed to `master` the same day. Deploy run #6 stopped at Test (the
+layout test could not find the Material icon font on GitHub's Linux runner;
+nothing was deployed). Fixed in `6b22c0e`; run #7 passed and
+https://simplek.pages.dev/app/version.json showed 1.4.0 (build 20261127).
+Still open: the hand tests below, signed in, on web and the phone. Look only: no screen's data or rules
 changed, except that Record payment now has the payment date the design
 shows (today by default).
 
