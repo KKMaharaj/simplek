@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -7,20 +7,35 @@ import 'package:shared_preferences/shared_preferences.dart';
 ///
 /// The password is still what signs an account in. Once signed in, the session
 /// stays on the device and this lock guards it, so opening the app needs only
-/// a fingerprint or face. The choice is stored per device.
+/// a fingerprint or face.
+///
+/// Rules (CR 26 Nov, login fixes L1):
+/// * a login (password or email link) never asks for the fingerprint;
+/// * it is asked when the app opens with a saved login, or comes back after
+///   more than 45 seconds in the background;
+/// * the choice is stored per account, so another account signing in on the
+///   same phone doesn't inherit it.
 abstract final class AppLock {
-  static const _enabledKey = 'app_lock_enabled';
-  static const _offeredKey = 'app_lock_offer_shown';
+  static String _enabledKey(String user) => 'app_lock_enabled_$user';
+  static String _offeredKey(String user) => 'app_lock_offer_shown_$user';
 
   static final enabled = ValueNotifier(false);
   static final _auth = LocalAuthentication();
+  static String? _user;
 
-  /// Set after a password login so the user is not asked twice in a row.
+  /// Set by a login that just happened, so the user is not asked twice in a
+  /// row. Read and reset once, when the lock gate opens.
   static bool _unlockedThisSession = false;
 
-  static Future<void> load() async {
+  /// Reads the choice of [user] (null when signed out: off).
+  static Future<void> load([String? user]) async {
+    _user = user;
+    if (user == null) {
+      enabled.value = false;
+      return;
+    }
     final preferences = await SharedPreferences.getInstance();
-    enabled.value = preferences.getBool(_enabledKey) ?? false;
+    enabled.value = preferences.getBool(_enabledKey(user)) ?? false;
   }
 
   /// True when this device has a fingerprint or face enrolled.
@@ -50,19 +65,28 @@ abstract final class AppLock {
     if (value && !await authenticate('Confirm to turn on quick unlock')) {
       return false;
     }
-    final preferences = await SharedPreferences.getInstance();
-    await preferences.setBool(_enabledKey, value);
+    final user = _user;
+    if (user != null) {
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setBool(_enabledKey(user), value);
+    }
     enabled.value = value;
     return true;
   }
 
+  /// Call when a login has just succeeded (password or email link).
   static void markSignedInWithPassword() => _unlockedThisSession = true;
 
+  /// For tests: whether the next lock gate will skip the lock.
+  @visibleForTesting
+  static bool get justSignedIn => _unlockedThisSession;
+
   static Future<bool> _shouldOffer() async {
-    if (enabled.value || !await isAvailable()) return false;
+    final user = _user;
+    if (user == null || enabled.value || !await isAvailable()) return false;
     final preferences = await SharedPreferences.getInstance();
-    if (preferences.getBool(_offeredKey) ?? false) return false;
-    await preferences.setBool(_offeredKey, true);
+    if (preferences.getBool(_offeredKey(user)) ?? false) return false;
+    await preferences.setBool(_offeredKey(user), true);
     return true;
   }
 }
@@ -87,7 +111,7 @@ class AppLockGate extends StatefulWidget {
 class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
   static const _relockAfter = Duration(seconds: 45);
 
-  late bool _locked = AppLock.enabled.value && !AppLock._unlockedThisSession;
+  bool _locked = false;
   bool _prompting = false;
   DateTime? _hiddenAt;
 
@@ -95,6 +119,8 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Decide first, then reset: a login that just happened skips the lock.
+    _locked = AppLock.enabled.value && !AppLock._unlockedThisSession;
     AppLock._unlockedThisSession = false;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_locked) {
