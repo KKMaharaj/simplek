@@ -39,6 +39,20 @@
 - **Encryption uses gpg (AES-256)**, the change request's second choice:
   `age` only reads a passphrase from a keyboard, so it can't run unattended.
 
+- **Sign-up email needs custom SMTP (login fixes, cause F): owner's step.**
+  Supabase → Authentication → Emails → SMTP Settings. Without it Supabase
+  sends sign-up emails only to the project's team members, at most 2 an hour,
+  so customers can't sign up. Gmail SMTP with an app password, or a free
+  Brevo account, is enough to start.
+- **Redirect URLs (login fixes L5): owner to check.** The app sends sign-up
+  links back to `simplek://login-callback/` (Android; the app's manifest
+  handles it) and to the web app's own address,
+  `https://simplek.pages.dev/app/`. Both must be listed in Supabase →
+  Authentication → URL Configuration → Redirect URLs, and the Site URL should
+  be `https://simplek.pages.dev/app/`. They can't be read from the project's
+  code: `supabase/config.toml` only holds local-development values
+  (`127.0.0.1:3000`), and the live settings are in the dashboard.
+
 ## Needs owner's confirmation
 
 - **A lawyer must review the Privacy Notice and Terms before launch**

@@ -265,8 +265,10 @@ class _PrivacyUpdatePageState extends State<PrivacyUpdatePage> {
                       const SizedBox(height: 8),
                       Center(
                         child: TextButton(
-                          onPressed: () =>
-                              Supabase.instance.client.auth.signOut(),
+                          onPressed: () => signOutEverywhereOnThisDevice(
+                            context,
+                            confirm: false,
+                          ),
                           child: const Text('Log out'),
                         ),
                       ),
@@ -893,8 +895,12 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
           ],
         ),
       );
-      await Supabase.instance.client.auth.signOut(scope: SignOutScope.global);
-      if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
+      if (!mounted) return;
+      await signOutEverywhereOnThisDevice(
+        context,
+        confirm: false,
+        scope: SignOutScope.global,
+      );
     } catch (error) {
       if (!mounted) return;
       setState(() => _deleting = false);

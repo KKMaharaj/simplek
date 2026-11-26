@@ -31,3 +31,13 @@ Future<String> writeAppFile(String name, List<int> bytes) async {
 
 Widget localImage(String path, {BoxFit fit = BoxFit.contain}) =>
     Image.file(File(path), fit: fit);
+
+/// Removes a file written by [writeAppFile] or [writeTempFile], if it exists.
+Future<void> deleteLocalFile(String? path) async {
+  if (!localFileExists(path)) return;
+  try {
+    await File(path!).delete();
+  } catch (_) {
+    // Already gone or in use; the next account overwrites it anyway.
+  }
+}

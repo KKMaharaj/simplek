@@ -45,6 +45,7 @@ part 'document_parts.dart';
 part 'invoice_delete.dart';
 part 'server_lists.dart';
 part 'privacy_pages.dart';
+part 'session.dart';
 
 final invoiceChanges = ValueNotifier<int>(0);
 
@@ -551,20 +552,33 @@ class _AppLaunchSplashState extends State<AppLaunchSplash> {
 String get _authRedirectUrl =>
     kIsWeb ? '${Uri.base.origin}${Uri.base.path}' : 'simplek://login-callback/';
 
+/// A sign-up started on this device, waiting for its email link. Login
+/// fixes L2: it also keeps the email and the time, and AuthGate uses it only
+/// for that email, within 24 hours, before a password exists
+/// ([pendingSignupApplies]); otherwise it is deleted.
 class PendingSignup {
   static const _nameKey = 'pending_signup_name';
   static const _businessKey = 'pending_signup_business';
   static const _mobileKey = 'pending_signup_mobile';
+  static const _emailKey = 'pending_signup_email';
+  static const _savedAtKey = 'pending_signup_saved_at';
 
   static Future<void> save({
     required String name,
     required String businessName,
     required String mobile,
+    required String email,
+    DateTime? savedAt,
   }) async {
     final preferences = await SharedPreferences.getInstance();
     await preferences.setString(_nameKey, name);
     await preferences.setString(_businessKey, businessName);
     await preferences.setString(_mobileKey, mobile);
+    await preferences.setString(_emailKey, email.trim().toLowerCase());
+    await preferences.setString(
+      _savedAtKey,
+      (savedAt ?? DateTime.now()).toUtc().toIso8601String(),
+    );
   }
 
   static Future<Map<String, String>?> load() async {
@@ -575,14 +589,22 @@ class PendingSignup {
       'name': name,
       'businessName': preferences.getString(_businessKey) ?? '',
       'mobile': preferences.getString(_mobileKey) ?? '',
+      'email': preferences.getString(_emailKey) ?? '',
+      'savedAt': preferences.getString(_savedAtKey) ?? '',
     };
   }
 
   static Future<void> clear() async {
     final preferences = await SharedPreferences.getInstance();
-    await preferences.remove(_nameKey);
-    await preferences.remove(_businessKey);
-    await preferences.remove(_mobileKey);
+    for (final key in [
+      _nameKey,
+      _businessKey,
+      _mobileKey,
+      _emailKey,
+      _savedAtKey,
+    ]) {
+      await preferences.remove(key);
+    }
   }
 }
 
@@ -601,43 +623,135 @@ class _AuthGateState extends State<AuthGate> {
   /// CR-25B B4: the current Privacy Notice still has to be accepted.
   bool _needsConsent = false;
 
+  /// Login fixes L3: an owner account with no business profile yet.
+  bool _needsSetup = false;
+
   @override
   void initState() {
     super.initState();
-    _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen(
-      (_) => _refresh(),
-    );
+    _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((
+      state,
+    ) {
+      // L1: a login that just happened (password or email link) skips the
+      // fingerprint. A saved login restored at start-up is "initialSession".
+      if (state.event == AuthChangeEvent.signedIn) {
+        AppLock.markSignedInWithPassword();
+      }
+      _refresh();
+    });
     _refresh();
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => WebStorageNotice.showIfNeeded(context),
     );
   }
 
+  /// True/false when the server says whether this account has a business
+  /// profile; null when it can't be asked (offline): don't block the app.
+  static Future<bool?> _hasOwnProfile(String userId) async {
+    try {
+      return await Supabase.instance.client
+              .from('business_profiles')
+              .select('user_id')
+              .eq('user_id', userId)
+              .maybeSingle() !=
+          null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<int> _sharedCount() async {
+    try {
+      return (await BusinessAccess.sharedWithMe()).length;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   Future<void> _refresh() async {
+    final client = Supabase.instance.client;
+    final user = client.auth.currentUser;
     LiveSync.sync();
-    await ListPrefs.load(Supabase.instance.client.auth.currentUser?.id);
+    await ListPrefs.load(user?.id);
+    await AppLock.load(user?.id);
     var needsConsent = false;
+    var needsSetup = false;
     DateTime? deletionCancelled;
-    if (Supabase.instance.client.auth.currentSession != null) {
+    String? message;
+    Map<String, String>? pendingSignup = await PendingSignup.load();
+    if (client.auth.currentSession != null && user != null) {
+      // L4: another account was on this device: forget its business first.
+      if (await LastAccount.switchedTo(user.id)) {
+        BusinessAccess.viewing.value = null;
+        await BusinessSettings.clearLocal();
+      }
       unawaited(OfflineStore.syncAll());
       await BusinessAccess.restore();
-      await BusinessSettings.syncFromCloud();
-      final privacy = await Future.wait<Object?>([
+      // L4: a new account never shows another account's details.
+      await BusinessSettings.syncFromCloud(clearIfMissing: true);
+      final checks = await Future.wait<Object?>([
         PrivacyRecords.needsAcceptance(),
         PrivacyRecords.cancelPendingDeletion(),
+        _hasOwnProfile(user.id),
+        _sharedCount(),
       ]);
-      needsConsent = privacy[0] as bool;
-      deletionCancelled = privacy[1] as DateTime?;
+      needsConsent = checks[0] as bool;
+      deletionCancelled = checks[1] as DateTime?;
+      final hasProfile = checks[2] as bool?;
+      final shared = checks[3] as int;
+      // Old accounts that log in with a password count as having one.
+      final passwordSet =
+          user.userMetadata?['password_set'] == true ||
+          SessionOrigin.passwordLogin;
+      if (pendingSignup != null) {
+        final applies = pendingSignupApplies(
+          pending: pendingSignup,
+          signedInEmail: user.email,
+          passwordSet: passwordSet,
+          passwordLogin: SessionOrigin.passwordLogin,
+        );
+        final existing = isExistingAccount(
+          passwordSet: passwordSet,
+          hasProfile: hasProfile ?? true,
+          accountCreated: DateTime.tryParse(user.createdAt),
+          signupStarted: DateTime.tryParse(pendingSignup['savedAt'] ?? ''),
+        );
+        if (!applies || existing) {
+          await PendingSignup.clear();
+          if (applies && existing) {
+            message =
+                "You already have a Simplek account. You're now logged in.";
+          }
+          pendingSignup = null;
+        }
+      }
+      needsSetup =
+          pendingSignup == null &&
+          hasProfile != null &&
+          needsBusinessSetup(hasProfile: hasProfile, sharedBusinesses: shared);
     } else {
       BusinessAccess.viewing.value = null;
+      // Signed out: a sign-up waiting for its email link stays, but isn't
+      // shown until that link signs in.
+      pendingSignup = null;
     }
-    final pendingSignup = await PendingSignup.load();
     if (mounted) {
       setState(() {
         _pendingSignup = pendingSignup;
         _needsConsent = needsConsent;
+        _needsSetup = needsSetup;
         _loading = false;
       });
+      if (message != null) {
+        final text = message;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text(text)));
+          }
+        });
+      }
       if (deletionCancelled != null) {
         final day = deletionCancelled;
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -676,6 +790,7 @@ class _AuthGateState extends State<AuthGate> {
         name: pendingSignup['name']!,
         businessName: pendingSignup['businessName']!,
         mobile: pendingSignup['mobile']!,
+        onFinished: _refresh,
       );
     }
     if (_needsConsent) {
@@ -683,8 +798,19 @@ class _AuthGateState extends State<AuthGate> {
         onAccepted: () => setState(() => _needsConsent = false),
       );
     }
+    if (_needsSetup) {
+      final meta =
+          Supabase.instance.client.auth.currentUser?.userMetadata ?? const {};
+      return BusinessOnboardingPage(
+        ownerName: meta['full_name']?.toString() ?? '',
+        businessName: meta['business_name']?.toString() ?? '',
+        mobile: meta['mobile']?.toString() ?? '',
+        onFinished: _refresh,
+      );
+    }
     return AppLockGate(
-      onUsePassword: () => Supabase.instance.client.auth.signOut(),
+      onUsePassword: () =>
+          signOutEverywhereOnThisDevice(context, confirm: false),
       child: const _ModernHome(),
     );
   }
@@ -1213,26 +1339,8 @@ class _Sidebar extends StatelessWidget {
   }
 }
 
-Future<void> _confirmLogout(BuildContext context) async {
-  final confirmed = await showDialog<bool>(
-    context: context,
-    builder: (dialog) => AlertDialog(
-      title: const Text('Log out of Simplek?'),
-      content: const Text('You will need your password to log in again.'),
-      actions: [
-        OutlinedButton(
-          onPressed: () => Navigator.pop(dialog, false),
-          child: const Text('Stay'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(dialog, true),
-          child: const Text('Log out'),
-        ),
-      ],
-    ),
-  );
-  if (confirmed == true) await Supabase.instance.client.auth.signOut();
-}
+Future<void> _confirmLogout(BuildContext context) =>
+    signOutEverywhereOnThisDevice(context);
 
 class _MorePage extends StatelessWidget {
   const _MorePage();
@@ -2012,11 +2120,22 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _loading = true);
     try {
       final email = _emailController.text.trim().toLowerCase();
-      AppLock.markSignedInWithPassword();
+      SessionOrigin.passwordLogin = true;
       await Supabase.instance.client.auth.signInWithPassword(
         email: email,
         password: _passwordController.text,
       );
+      // L1: only after the login succeeded.
+      AppLock.markSignedInWithPassword();
+      // L3: an account that logs in with a password has one.
+      final meta = Supabase.instance.client.auth.currentUser?.userMetadata;
+      if (meta?['password_set'] != true) {
+        unawaited(
+          Supabase.instance.client.auth
+              .updateUser(UserAttributes(data: {'password_set': true}))
+              .then((_) {}, onError: (_) {}),
+        );
+      }
       final preferences = await SharedPreferences.getInstance();
       await preferences.setBool('auth_remember_email_enabled', _rememberEmail);
       if (_rememberEmail) {
@@ -2025,12 +2144,14 @@ class _LoginPageState extends State<LoginPage> {
         await preferences.remove('auth_remembered_email');
       }
     } on AuthException catch (error) {
+      SessionOrigin.passwordLogin = false;
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(error.message)));
       }
     } catch (error) {
+      SessionOrigin.passwordLogin = false;
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -2346,6 +2467,7 @@ class _SignupPageState extends State<SignupPage> {
         name: _nameController.text.trim(),
         businessName: _businessController.text.trim(),
         mobile: _mobileController.text.trim(),
+        email: email,
       );
       if (!mounted) return;
       await Navigator.of(context).push(
@@ -2353,24 +2475,11 @@ class _SignupPageState extends State<SignupPage> {
           builder: (_) => EmailLinkWaitingPage(email: email),
         ),
       );
-    } on AuthException catch (error) {
+    } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text(error.message)));
-      }
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              _connectionMessage(
-                error,
-                fallback: 'Unable to send the verification email right now.',
-              ),
-            ),
-          ),
-        );
+        ).showSnackBar(SnackBar(content: Text(signupEmailError(error))));
       }
     } finally {
       if (mounted) setState(() => _sendingEmail = false);
@@ -2528,11 +2637,11 @@ class _EmailLinkWaitingPageState extends State<EmailLinkWaitingPage> {
           const SnackBar(content: Text('A new verification email was sent.')),
         );
       }
-    } on AuthException catch (error) {
+    } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text(error.message)));
+        ).showSnackBar(SnackBar(content: Text(signupEmailError(error))));
       }
     } finally {
       if (mounted) setState(() => _resending = false);
@@ -2574,6 +2683,13 @@ class _EmailLinkWaitingPageState extends State<EmailLinkWaitingPage> {
                   'We sent a sign-in link to ${widget.email}. Open the email and tap the link. The app will return here automatically so you can set your password.',
                   textAlign: TextAlign.center,
                 ),
+                const SizedBox(height: 8),
+                Text(
+                  'Open the link on this ${kIsWeb ? 'computer' : 'phone'}. If you open it on '
+                  'a${kIsWeb ? ' phone' : ' computer'}, sign up there instead.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
                 const SizedBox(height: 24),
                 FilledButton.icon(
                   onPressed: null,
@@ -2598,6 +2714,7 @@ class _EmailLinkWaitingPageState extends State<EmailLinkWaitingPage> {
 class PasswordSetupPage extends StatefulWidget {
   const PasswordSetupPage({
     super.key,
+    this.onFinished,
     required this.name,
     required this.businessName,
     required this.mobile,
@@ -2605,6 +2722,9 @@ class PasswordSetupPage extends StatefulWidget {
   final String name;
   final String businessName;
   final String mobile;
+
+  /// Called when the password is set (AuthGate then follows the server).
+  final Future<void> Function()? onFinished;
 
   @override
   State<PasswordSetupPage> createState() => _PasswordSetupPageState();
@@ -2628,19 +2748,16 @@ class _PasswordSetupPageState extends State<PasswordSetupPage> {
             'full_name': widget.name,
             'business_name': widget.businessName,
             'mobile': widget.mobile,
+            // L3: the server now knows this account has a password.
+            'password_set': true,
           },
         ),
       );
+      // The sign-up is complete; business set-up follows the server
+      // (AuthGate shows it while the account has no business profile).
+      await PendingSignup.clear();
       if (!mounted) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => BusinessOnboardingPage(
-            ownerName: widget.name,
-            businessName: widget.businessName,
-            mobile: widget.mobile,
-          ),
-        ),
-      );
+      await widget.onFinished?.call();
     } on AuthException catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -2739,6 +2856,22 @@ class _PasswordSetupPageState extends State<PasswordSetupPage> {
                   : const Icon(Icons.lock_reset_outlined),
               label: Text(_saving ? 'Saving...' : 'Set password and continue'),
             ),
+            const SizedBox(height: 8),
+            // L2: never a dead end.
+            TextButton(
+              onPressed: _saving
+                  ? null
+                  : () async {
+                      await PendingSignup.clear();
+                      if (context.mounted) {
+                        await signOutEverywhereOnThisDevice(
+                          context,
+                          confirm: false,
+                        );
+                      }
+                    },
+              child: const Text('Cancel and log out'),
+            ),
           ],
         ),
       ),
@@ -2761,11 +2894,15 @@ class BusinessOnboardingPage extends StatefulWidget {
     required this.ownerName,
     required this.businessName,
     required this.mobile,
+    this.onFinished,
   });
 
   final String ownerName;
   final String businessName;
   final String mobile;
+
+  /// Called when set-up is done (AuthGate then opens Home).
+  final Future<void> Function()? onFinished;
 
   @override
   State<BusinessOnboardingPage> createState() => _BusinessOnboardingPageState();
@@ -3019,12 +3156,36 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
     if (!_brandingKey.currentState!.validate()) return;
     setState(() => _saving = true);
     try {
+      // L3: never overwrite a saved business profile from set-up. If the
+      // server already has one (set up on another device), load it instead.
+      final user = Supabase.instance.client.auth.currentUser;
+      final existing = user == null
+          ? null
+          : await Supabase.instance.client
+                .from('business_profiles')
+                .select('user_id')
+                .eq('user_id', user.id)
+                .maybeSingle();
+      if (existing != null) {
+        await BusinessSettings.syncFromCloud(clearIfMissing: true);
+        await PendingSignup.clear();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Your business was already set up, so nothing was changed.',
+            ),
+          ),
+        );
+        await _done();
+        return;
+      }
       await BusinessSettings.setGstRegistered(_gstRegistered == true);
       await BusinessSettings.setDocumentTerms(
         quotation: _quotationTermsController.text.trim(),
         invoice: _invoiceTermsController.text.trim(),
       );
-      await BusinessSettings.saveProfile({
+      await BusinessSettings.saveProfile(createOnly: true, {
         'ownerName': _ownerController.text.trim(),
         'name': _businessController.text.trim(),
         ..._address.toProfile(),
@@ -3047,24 +3208,13 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
         'quotationPrefix': _quotationPrefixController.text.trim().toUpperCase(),
       });
       await PendingSignup.clear();
-      await Supabase.instance.client.auth.signOut();
+      invoiceChanges.value++;
       if (!mounted) return;
-      await showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Setup complete'),
-          content: const Text(
-            'Your business profile is ready. Please log in with your new password.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Go to login'),
-            ),
-          ],
-        ),
-      );
-      if (mounted) _returnToDashboard(context);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Your business is set up.')));
+      // L3: straight to Home; the password was just set.
+      await _done();
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -3073,6 +3223,15 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
       }
     } finally {
       if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _done() async {
+    final finished = widget.onFinished;
+    if (finished != null) {
+      await finished();
+    } else if (mounted) {
+      _returnToDashboard(context);
     }
   }
 
@@ -3120,6 +3279,13 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
                           ),
                         ],
                       ),
+                    ),
+                    // L3: there is always a way out.
+                    TextButton(
+                      onPressed: _saving
+                          ? null
+                          : () => signOutEverywhereOnThisDevice(context),
+                      child: const Text('Log out'),
                     ),
                   ],
                 ),
@@ -4511,8 +4677,13 @@ class _CustomerHistoryPageState extends State<CustomerHistoryPage> {
 
 class BusinessSettings {
   static String get _invoiceThemeCacheKey {
-    final user = Supabase.instance.client.auth.currentUser;
-    return 'business_invoice_theme_${user?.id ?? 'signed_out'}';
+    String? user;
+    try {
+      user = Supabase.instance.client.auth.currentUser?.id;
+    } catch (_) {
+      // Supabase not started yet (tests): no account.
+    }
+    return 'business_invoice_theme_${user ?? 'signed_out'}';
   }
 
   static final themeMode = ValueNotifier(ThemeMode.light);
@@ -4834,7 +5005,12 @@ class BusinessSettings {
     await preferences.setString(_invoiceTermsKey, invoice);
   }
 
-  static Future<void> saveProfile(Map<String, String> value) async {
+  /// Saves the profile here and on the server. With [createOnly] (business
+  /// set-up) an existing server row is never overwritten (login fixes L3).
+  static Future<void> saveProfile(
+    Map<String, String> value, {
+    bool createOnly = false,
+  }) async {
     if (BusinessAccess.readOnly) {
       throw StateError(BusinessAccess.readOnlyMessage);
     }
@@ -4874,7 +5050,7 @@ class BusinessSettings {
       if (mediaPaths[1] != null) 'signature_object_path': mediaPaths[1],
       if (mediaPaths[2] != null) 'qr_object_path': mediaPaths[2],
       'updated_at': DateTime.now().toUtc().toIso8601String(),
-    });
+    }, ignoreDuplicates: createOnly);
     await Supabase.instance.client.auth.updateUser(
       UserAttributes(
         data: {
@@ -4882,6 +5058,34 @@ class BusinessSettings {
         },
       ),
     );
+  }
+
+  /// Login fixes L4: forgets the signed-out account's business on this
+  /// device: the profile (plain and protected keys), the downloaded logo,
+  /// signature and QR files, the terms, GST status and due day, so the next
+  /// account never sees or uses them. Unsynced offline items are kept: they
+  /// are stored under their own account.
+  static Future<void> clearLocal() async {
+    final old = profile.value;
+    for (final key in ['logoPath', 'signaturePath', 'qrPath']) {
+      await deleteLocalFile(old[key]);
+    }
+    await _saveLocalProfile(const {});
+    final preferences = await SharedPreferences.getInstance();
+    for (final key in [
+      _gstRegisteredKey,
+      _defaultDueDayKey,
+      _defaultTermsKey,
+      _quotationTermsKey,
+      _invoiceTermsKey,
+    ]) {
+      await preferences.remove(key);
+    }
+    isGstRegistered.value = false;
+    defaultDueDay.value = 7;
+    defaultTerms.value = '';
+    quotationTerms.value = DocumentDefaults.resolve('', isQuotation: true);
+    invoiceTerms.value = DocumentDefaults.resolve('', isQuotation: false);
   }
 
   static Future<void> _saveLocalProfile(Map<String, String> value) async {

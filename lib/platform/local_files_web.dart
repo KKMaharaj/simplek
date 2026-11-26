@@ -30,3 +30,6 @@ Widget localImage(String path, {BoxFit fit = BoxFit.contain}) {
       ? const SizedBox.shrink()
       : Image.memory(bytes, fit: fit);
 }
+
+/// Removes a file kept in memory for this session.
+Future<void> deleteLocalFile(String? path) async => _files.remove(path);
