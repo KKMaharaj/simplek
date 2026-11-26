@@ -58,4 +58,41 @@ shows (today by default).
 
 ## Change request of 25 Nov 2026, part B (`docs/CHANGE_REQUEST_2026-11-25_STANDARDS.md`)
 
-Not started.
+Branch `cr-2026-11-25-standards`, version 1.5.0 (build 20261128). **Not on
+`master` yet: waiting for the owner's check with real data and approval of
+the screenshots.**
+
+Database, 27 Nov: backed up first (`backups/20261127_*`, 37 invoices, 31
+customers, 32 items, 4 businesses; again as `backups/20261127b_*` before B4),
+each migration dry-run and rehearsed in a rolled-back transaction, then
+applied: `20261127000000` (B1), `…0001` (B3), `…0002` (B2), `…0003` (B4),
+`…0004` (B4 schedule). All nine SQL test files in `supabase/tests/` pass on
+the live database. The live 1.4.0 app keeps working (older versions are
+recalculated by the server; nothing they use was removed). Edge function
+`privacy-daily` deployed; its first run removed nothing (0 accounts, 0
+sign-ups, 0 exports).
+
+| # | Change | Status | Where to check |
+|---|---|---|---|
+| B1 | Delete invoice (soft delete, `deleted_at`/`deleted_by`, owner-checked server function; hidden from every list, total, report, GSTR-1, export and balance; payments go with it; number never reused; Undo for 10 s; accountants can't) | Done (database tested live); **Needs hand test** in the app | Invoice view ⋯ and list ⋮ → Delete invoice. `supabase/tests/20261127_cr25b_b1_regressions.sql`, `test/cr25b_b1_test.dart` |
+| B1 | One warning dialog; GST line only for GST businesses; "Edit anyway" once for invoices dated before today (GST only); note after changing name, address, GSTIN, bank, UPI, or a product's HSN/SAC or GST rate | Done; **Needs hand test** | Test plan INV-026…030, SET-009 |
+| B1 | Audit log of every delete, restore and edit, with old values (not shown in the app) | Done (tested live) | `audit_log` in Supabase |
+| B2 | Totals on the server over all matching invoices (no deleted, draft or cancelled): Home, invoice and customer tiles, customer history, Reports (summary, customer-wise, item-wise, GSTR-1 checks) | Done (650-invoice SQL test equals direct sums, live); **Needs hand test** | `supabase/tests/20261127_cr25b_b2_regressions.sql` |
+| B2 | Invoices, Quotations, Customers, Items and the Record payment picker page on the server: "Showing 26–50 of 287", ‹ Prev 1 2 3 … Next ›, 10/25/50/100 remembered per user from 600 px; pages of 25 with "Page 2 of 12" on phones; search, filters and sort on the server, back to page 1 on change | Done; **Needs hand test** with real data | `test/cr25b_b2_test.dart`; NAV-012, NAV-013, SRCH-005 |
+| B2 | Web address keeps tab, page, search, filters, sort and dates | Done; **Needs hand test** | NAV-014 |
+| B2 | Date presets on Invoices and Reports (Today … This year = financial year, Custom) | Done | RPT-013 |
+| B2 | Exports (PDF, Excel, CSV, Tally) include every matching invoice, with the business, dates, count and time at the top | Done; **Needs hand test** | RPT-014 |
+| B2 | Status badges always have words | Done (since the redesign) | `StatusChip` |
+| B3 | All money maths in integer paise (`Paise`, `LineMoney`, `DocumentMoney` in `lib/money.dart`); one rounding rule written in `money.dart` and `NOTES.md` (CGST = tax ÷ 2 half-up, SGST = tax − CGST); PDF rate-wise lines are sums of lines | Done | `test/money_test.dart` (5% on ₹101, 3 × ₹33.33 @ 18%, 0%, mixed rates, ₹1.25 crore) |
+| B3 | `save_invoice` repeats the maths and refuses a mismatch from this app; older versions are recalculated; saved invoices keep their amounts | Done (tested live) | `supabase/tests/20261127_cr25b_b3_regressions.sql` |
+| B4 | Privacy Notice `/privacy` and Terms `/terms`, linked from the website footer, sign-up, login and Settings | Done as **drafts: a lawyer must review them before launch**; the owner's details are placeholders (`NOTES.md`) | `website/privacy.html`, `website/terms.html` |
+| B4 | Unticked consent box at sign-up; `consents` table (time, version, web/Android, IP, device); one-time "We've updated our Privacy Notice" screen | Done (tested live in SQL); **Needs hand test** of a real sign-up | AUTH-017, AUTH-018 |
+| B4 | Settings → Your data and privacy: Download my data (ZIP: JSON, Excel, every invoice PDF; 24-hour link), Correct my data, Nominate a person, Raise a concern (30-day due date, status), grievance contact, Delete my account (30 days' grace, a login cancels it, day 31 deletes everything) | Done (deletion tested live with made-up logins and a moved clock); **Needs hand test** of the download | SEC-008…010; `supabase/tests/20261127_cr25b_b4_regressions.sql` |
+| B4 | Daily clean-up (sign-ups never completed after 30 days, deletions on day 31, audit entries anonymised after a year, exports after 7 days) | Done: `privacy-daily` deployed and scheduled at 03:00 IST | `cron.job` in Supabase |
+| B4 | `docs/SECURITY.md`, `docs/BREACH-RESPONSE.md`, web storage notice, optional fields marked "(optional)" | Done (breach-plan names are placeholders) | SEC-011 |
+| B4 | Raise a concern emails the grievance contact | **Not started**: needs an email service (super admin change request) | `NOTES.md` |
+| B5 | Nightly encrypted backup workflow (02:30 IST, database and every Storage file, gpg AES-256, R2 daily + monthly, keep 30 + 12, size check) and `docs/RESTORE.md` | **In progress**: written and tested locally (encrypt/decrypt round trip, counts, pruning); needs the owner's R2 bucket and GitHub secrets, then a run | `.github/workflows/nightly-backup.yml`, `tool/backup/` |
+| B5 | One tested restore into a test Supabase project | **Not started**: needs the owner's test project. B5 is not Done until this passes | `docs/RESTORE.md` |
+| B5 | Download my backup on More → Sync and backup, with the last download date on this device | Done; **Needs hand test** | SYNC-008 |
+| — | Test plan: 27 new cases; Known Issues KI-01/KI-02 marked fixed | Done | `docs/Simplek_Test_Plan.xlsx` |
+| — | Version 1.5.0 (build 20261128) | Done; APK not built yet | Login screen; Settings |
