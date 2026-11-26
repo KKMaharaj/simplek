@@ -92,14 +92,29 @@ Future<void> _loadFonts() async {
 
   await load('Inter', 'assets/fonts/Inter.ttf');
   await load('Fraunces', 'assets/fonts/Fraunces.ttf');
+  // The Material icon font, if this Flutter install has it. The file name's
+  // case differs between installs (GitHub's Linux runner is case-sensitive),
+  // so match it case-insensitively. Without it the test font draws each icon
+  // as a square of the same size, which measures the same.
+  final icons = _materialIconFont();
+  if (icons != null) await load('MaterialIcons', icons);
+}
+
+String? _materialIconFont() {
+  // flutter_tester lives under <sdk>/bin/cache/artifacts/engine/...
   var dir = File(Platform.resolvedExecutable).parent;
-  while (!Directory('${dir.path}/artifacts/material_fonts').existsSync()) {
+  while (true) {
+    final fonts = Directory('${dir.path}/artifacts/material_fonts');
+    if (fonts.existsSync()) {
+      for (final file in fonts.listSync().whereType<File>()) {
+        final name = file.uri.pathSegments.last.toLowerCase();
+        if (name == 'materialicons-regular.otf') return file.path;
+      }
+      return null;
+    }
+    if (dir.parent.path == dir.path) return null;
     dir = dir.parent;
   }
-  await load(
-    'MaterialIcons',
-    '${dir.path}/artifacts/material_fonts/materialicons-regular.otf',
-  );
 }
 
 void main() {
