@@ -19,7 +19,9 @@ import 'app_version.dart';
 import 'date_presets.dart';
 import 'paging.dart';
 import 'url_state.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:archive/archive.dart';
+import 'package:flutter/foundation.dart'
+    show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -42,6 +44,7 @@ part 'customer_form.dart';
 part 'document_parts.dart';
 part 'invoice_delete.dart';
 part 'server_lists.dart';
+part 'privacy_pages.dart';
 
 final invoiceChanges = ValueNotifier<int>(0);
 
@@ -595,6 +598,9 @@ class _AuthGateState extends State<AuthGate> {
   Map<String, String>? _pendingSignup;
   bool _loading = true;
 
+  /// CR-25B B4: the current Privacy Notice still has to be accepted.
+  bool _needsConsent = false;
+
   @override
   void initState() {
     super.initState();
@@ -602,15 +608,26 @@ class _AuthGateState extends State<AuthGate> {
       (_) => _refresh(),
     );
     _refresh();
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => WebStorageNotice.showIfNeeded(context),
+    );
   }
 
   Future<void> _refresh() async {
     LiveSync.sync();
     await ListPrefs.load(Supabase.instance.client.auth.currentUser?.id);
+    var needsConsent = false;
+    DateTime? deletionCancelled;
     if (Supabase.instance.client.auth.currentSession != null) {
       unawaited(OfflineStore.syncAll());
       await BusinessAccess.restore();
       await BusinessSettings.syncFromCloud();
+      final privacy = await Future.wait<Object?>([
+        PrivacyRecords.needsAcceptance(),
+        PrivacyRecords.cancelPendingDeletion(),
+      ]);
+      needsConsent = privacy[0] as bool;
+      deletionCancelled = privacy[1] as DateTime?;
     } else {
       BusinessAccess.viewing.value = null;
     }
@@ -618,8 +635,24 @@ class _AuthGateState extends State<AuthGate> {
     if (mounted) {
       setState(() {
         _pendingSignup = pendingSignup;
+        _needsConsent = needsConsent;
         _loading = false;
       });
+      if (deletionCancelled != null) {
+        final day = deletionCancelled;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              duration: const Duration(seconds: 10),
+              content: Text(
+                'Welcome back. Your account was due to be deleted on '
+                '${screenDate(day)}; logging in cancelled that.',
+              ),
+            ),
+          );
+        });
+      }
     }
   }
 
@@ -643,6 +676,11 @@ class _AuthGateState extends State<AuthGate> {
         name: pendingSignup['name']!,
         businessName: pendingSignup['businessName']!,
         mobile: pendingSignup['mobile']!,
+      );
+    }
+    if (_needsConsent) {
+      return PrivacyUpdatePage(
+        onAccepted: () => setState(() => _needsConsent = false),
       );
     }
     return AppLockGate(
@@ -1533,6 +1571,8 @@ class _SyncCenterPageState extends State<SyncCenterPage> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 14),
+                const _BackupDownloadCard(),
                 if (_otherAccounts > 0) ...[
                   const SizedBox(height: 14),
                   Card(
@@ -2228,7 +2268,9 @@ class _LoginPageState extends State<LoginPage> {
                               ),
                               SizedBox(height: panelHeight < 300 ? 22 : 40),
                               card,
-                              const SizedBox(height: 28),
+                              const SizedBox(height: 16),
+                              const PrivacyLinks(center: true),
+                              const SizedBox(height: 8),
                               const VersionLine(),
                             ],
                           ),
@@ -2279,8 +2321,12 @@ class _SignupPageState extends State<SignupPage> {
   final _emailController = TextEditingController();
   bool _sendingEmail = false;
 
+  /// When the consent box was ticked (CR-25B B4).
+  DateTime? _consentAt;
+
   Future<void> _sendVerificationEmail() async {
     if (!_formKey.currentState!.validate()) return;
+    final consentAt = _consentAt ?? DateTime.now();
     setState(() => _sendingEmail = true);
     final email = _emailController.text.trim().toLowerCase();
     try {
@@ -2292,6 +2338,7 @@ class _SignupPageState extends State<SignupPage> {
           'full_name': _nameController.text.trim(),
           'business_name': _businessController.text.trim(),
           'mobile': _mobileController.text.trim(),
+          ...PrivacyRecords.signupConsent(consentAt),
         },
       );
       if (!mounted) return;
@@ -2418,7 +2465,12 @@ class _SignupPageState extends State<SignupPage> {
                 validator: _emailValidator,
               ),
             ),
-            const SizedBox(height: 26),
+            const SizedBox(height: 16),
+            ConsentField(
+              onChanged: (ticked) =>
+                  _consentAt = ticked ? DateTime.now() : null,
+            ),
+            const SizedBox(height: 18),
             FilledButton.icon(
               onPressed: _sendingEmail ? null : _sendVerificationEmail,
               icon: _sendingEmail
@@ -3364,6 +3416,7 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
         const SizedBox(height: 14),
         LabeledField(
           label: 'Default quotation terms',
+          optional: true,
           child: TextFormField(
             controller: _quotationTermsController,
             minLines: 5,
@@ -3377,6 +3430,7 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
         const SizedBox(height: 14),
         LabeledField(
           label: 'Default invoice terms',
+          optional: true,
           child: TextFormField(
             controller: _invoiceTermsController,
             minLines: 5,
@@ -3449,6 +3503,7 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
         const SizedBox(height: 12),
         LabeledField(
           label: 'IFSC code',
+          optional: true,
           child: TextFormField(
             controller: _ifscController,
             inputFormatters: upperCaseCodeFormatters(11),
@@ -3476,6 +3531,7 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
         const SizedBox(height: 12),
         LabeledField(
           label: 'Bank name',
+          optional: true,
           child: TextFormField(
             controller: _bankNameController,
             decoration: const InputDecoration(),
@@ -3484,6 +3540,7 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
         const SizedBox(height: 12),
         LabeledField(
           label: 'Branch',
+          optional: true,
           child: TextFormField(
             controller: _branchController,
             decoration: const InputDecoration(),
@@ -3492,6 +3549,7 @@ class _BusinessOnboardingPageState extends State<BusinessOnboardingPage> {
         const SizedBox(height: 12),
         LabeledField(
           label: 'Account number',
+          optional: true,
           child: TextFormField(
             controller: _accountController,
             keyboardType: TextInputType.number,
@@ -5600,6 +5658,7 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
                           const SizedBox(height: 8),
                           LabeledField(
                             label: 'Quotation terms',
+                            optional: true,
                             child: TextField(
                               controller: _quotationTermsController,
                               minLines: 3,
@@ -5610,6 +5669,7 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
                           const SizedBox(height: 12),
                           LabeledField(
                             label: 'Invoice terms',
+                            optional: true,
                             child: TextField(
                               controller: _invoiceTermsController,
                               minLines: 3,
@@ -5677,6 +5737,25 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
                     ),
                   ),
                   const SizedBox(height: 24),
+                  const SectionLabel('Your data and privacy'),
+                  RowGroup(
+                    children: [
+                      ListRowTile(
+                        leading: const IconTile(
+                          Icons.privacy_tip_outlined,
+                          size: 40,
+                        ),
+                        title: 'Your data and privacy',
+                        subtitle:
+                            'Download, correct or delete your data; nominee; concerns',
+                        showChevron: true,
+                        onTap: () =>
+                            _openPage(context, const PrivacySettingsPage()),
+                      ),
+                    ],
+                  ),
+                  const PrivacyLinks(),
+                  const SizedBox(height: 16),
                   const VersionLine(),
                   const SizedBox(height: 16),
                 ],
@@ -8220,6 +8299,7 @@ class _QuotationBuilderPageState extends State<QuotationBuilderPage> {
                     ? EditableTerms(controller: _termsController)
                     : LabeledField(
                         label: 'Terms and conditions',
+                        optional: true,
                         child: TextField(
                           controller: _termsController,
                           minLines: 3,
@@ -9519,6 +9599,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                       Expanded(
                         child: LabeledField(
                           label: 'WhatsApp number',
+                          optional: true,
                           child: TextFormField(
                             controller: _customerPhoneController,
                             keyboardType: TextInputType.phone,
@@ -9530,6 +9611,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                       Expanded(
                         child: LabeledField(
                           label: 'Email',
+                          optional: true,
                           child: TextFormField(
                             controller: _customerEmailController,
                             keyboardType: TextInputType.emailAddress,
@@ -9603,6 +9685,7 @@ class _InvoiceBuilderPageState extends State<InvoiceBuilderPage> {
                       ? EditableTerms(controller: _termsController)
                       : LabeledField(
                           label: 'Terms and conditions',
+                          optional: true,
                           child: TextField(
                             controller: _termsController,
                             minLines: 3,

@@ -79,6 +79,9 @@ final _screens = <String, Widget Function()>{
   'settings': () => const BusinessSettingsPage(),
   'customer form': () =>
       const Scaffold(body: CustomerFormDialog(asSheet: true)),
+  'privacy update': () => PrivacyUpdatePage(onAccepted: () {}),
+  'delete account': () => const DeleteAccountPage(),
+  'sign-up': () => const SignupPage(),
 };
 
 /// The app's real fonts, so text is measured as it is in the app (the

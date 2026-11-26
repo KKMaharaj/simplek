@@ -2,10 +2,47 @@
 
 ## Replace before launch
 
-- Nothing yet for this change request. (The LGD district list was imported on
-  26 Nov 2026; to refresh it later, see `supabase/imports/README.md`.)
+- (CR-25) The LGD district list was imported on 26 Nov 2026; to refresh it
+  later, see `supabase/imports/README.md`.
+- **Privacy Notice and Terms** (`website/privacy.html`, `website/terms.html`,
+  CR-25B B4): the legal name of the business that runs Simplek, its postal
+  address and contact email; the Terms' plans and prices and the courts that
+  have jurisdiction. Shown as "[… to be added]" on the pages.
+- **Grievance contact** (B4.5): a named person and email, on the Privacy
+  Notice (section 7) and in the app (`PrivacyInfo.grievanceName` and
+  `grievanceEmail` in `lib/privacy_pages.dart`).
+- **Breach plan roles** (`docs/BREACH-RESPONSE.md`): who is the breach lead,
+  the technical lead and the grievance contact.
+- **"Raise a concern" emails the grievance contact**: not yet. Requests are
+  stored (`privacy_requests`, due in 30 days, status shown to the user), but
+  Simplek has no email service until the super admin change request adds the
+  email settings. Until then, check new requests in the Supabase table
+  editor.
 
 ## Needs owner's confirmation
+
+- **A lawyer must review the Privacy Notice and Terms before launch**
+  (CR-25B B4). Both pages say "Draft: to be reviewed by a lawyer before
+  launch" until then.
+- **"This year" and "This quarter" follow the financial year** (B2 date
+  presets): this year is 1 April to 31 March, quarters are Apr–Jun, Jul–Sep,
+  Oct–Dec and Jan–Mar, as GST returns use. The button shows the dates.
+- **Download my data: the PDFs are made in the app** (B4). The server sends
+  everything as JSON (`export_my_data`, deleted invoices and payments
+  included) and the app adds the Excel file and every invoice PDF with the
+  same code it uses for invoices, zips them, stores the ZIP in a private
+  folder and opens a link that works for 24 hours. The change request said
+  "built on the server"; making the PDFs a second time on the server would
+  mean a second copy of the invoice design. Exports are removed after 7
+  days.
+- **Supabase Free keeps platform logs only briefly**, so "access and
+  security logs kept for at least 1 year" (B4.7) holds for Simplek's own
+  logs (audit log, consents, access invitations) but not for Supabase's API
+  and login logs until the project moves to a paid plan or the logs are
+  exported. See `docs/SECURITY.md`.
+- **Account deletion is confirmed by typing the business name**, or the
+  login email for an account without a business (an accountant's own
+  account).
 
 - **Description on the PDF is 9 pt** (terms are 9.5 pt) so that the full 300
   characters fit in three lines without cutting any text. Change request 9
@@ -65,6 +102,19 @@
   Quantity, rate and GST % are first rounded to the places the database keeps
   (3, 2 and 2 decimals), so the app and the server start from the same
   numbers. "Half-up" is half away from zero, as Postgres `round()` does.
+- **B4 consent**: the tick at sign-up is saved with the new account
+  (`privacy_consent_version`, `privacy_consent_at` in the user's metadata)
+  and stored in `consents` at the first login, with the IP from the request
+  headers. Anyone who hasn't accepted the current version
+  (`PrivacyInfo.noticeVersion`) sees "We've updated our Privacy Notice" once.
+  Changing the notice means a new version string.
+- **B4 deletion**: a login within the 30 days cancels it (checked at every
+  session start); asking to delete signs the account out on all devices so
+  only a real new login cancels it. On day 31 `privacy-daily` removes the
+  files and `purge_account` deletes every row and the login.
+- **B4 sign-ups never completed** = logins older than 30 days with no
+  business profile, not an invited accountant and no deletion pending. On
+  27 Nov 2026 that was 0 of the 7 logins.
 - **B3 on the server:** `save_invoice` works every amount out again. The app
   sends `money_rule: 'paise-v1'`; then any difference is refused ("…do not
   match the server's calculation. Update the app and try again."). Older app

@@ -15,6 +15,7 @@ const _types = {
   'wasm': 'application/wasm',
   'otf': 'font/otf',
   'ttf': 'font/ttf',
+  'woff2': 'font/woff2',
 };
 
 Future<void> main(List<String> args) async {
@@ -35,6 +36,11 @@ Future<void> main(List<String> args) async {
     }
     if (path.endsWith('/')) path += 'index.html';
     var file = File('${root.path}$path');
+    // Like Cloudflare Pages: /privacy serves privacy.html.
+    if (!file.existsSync() && File('${root.path}$path.html').existsSync()) {
+      path += '.html';
+      file = File('${root.path}$path');
+    }
     if (!file.existsSync() && Directory('${root.path}$path').existsSync()) {
       request.response.redirect(Uri.parse('${request.uri.path}/'));
       continue;
