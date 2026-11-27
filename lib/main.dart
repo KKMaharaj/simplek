@@ -48,6 +48,7 @@ part 'privacy_pages.dart';
 part 'session.dart';
 part 'admin_pages.dart';
 part 'tally_pages.dart';
+part 'password_reset.dart';
 
 final invoiceChanges = ValueNotifier<int>(0);
 
@@ -645,8 +646,15 @@ class _AuthGateState extends State<AuthGate> {
       if (state.event == AuthChangeEvent.signedIn) {
         AppLock.markSignedInWithPassword();
       }
+      // CR 19 Nov, change 2: a reset code or reset link logged in; ask for
+      // a new password before anything else.
+      if (state.event == AuthChangeEvent.passwordRecovery) {
+        AppLock.markSignedInWithPassword();
+        PasswordReset.recovering.value = true;
+      }
       _refresh();
     });
+    PasswordReset.recovering.addListener(_onRecoveringChanged);
     _refresh();
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => WebStorageNotice.showIfNeeded(context),
@@ -787,8 +795,18 @@ class _AuthGateState extends State<AuthGate> {
     }
   }
 
+  void _onRecoveringChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _finishRecovery() async {
+    PasswordReset.recovering.value = false;
+    await _refresh();
+  }
+
   @override
   void dispose() {
+    PasswordReset.recovering.removeListener(_onRecoveringChanged);
     _authSubscription?.cancel();
     super.dispose();
   }
@@ -800,6 +818,12 @@ class _AuthGateState extends State<AuthGate> {
     }
     if (Supabase.instance.client.auth.currentSession == null) {
       return const LoginPage();
+    }
+    if (PasswordReset.recovering.value) {
+      return ForcedPasswordPage(
+        reason: NewPasswordReason.recovery,
+        onDone: _finishRecovery,
+      );
     }
     final pendingSignup = _pendingSignup;
     if (pendingSignup != null) {
@@ -842,6 +866,11 @@ class _AuthGateState extends State<AuthGate> {
     return AppLockGate(
       onUsePassword: () =>
           signOutEverywhereOnThisDevice(context, confirm: false),
+      onForgotPassword: () {
+        PasswordReset.openFor =
+            Supabase.instance.client.auth.currentUser?.email ?? '';
+        return signOutEverywhereOnThisDevice(context, confirm: false);
+      },
       child: const Column(
         children: [
           NoticeBanner(),
@@ -2138,6 +2167,16 @@ class _LoginPageState extends State<LoginPage> {
         if (mounted) _openPage(context, const SignupPage());
       });
     }
+    // "Forgot password?" on the fingerprint lock screen logged out first.
+    final resetFor = PasswordReset.openFor;
+    if (resetFor != null) {
+      PasswordReset.openFor = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _openPage(context, ResetPasswordPage(initialEmail: resetFor));
+        }
+      });
+    }
   }
 
   Future<void> _loadRememberedEmail() async {
@@ -2281,7 +2320,7 @@ class _LoginPageState extends State<LoginPage> {
                   onFieldSubmitted: (_) => _login(),
                 ),
               ),
-              const SizedBox(height: 6),
+              ForgotPasswordLink(email: () => _emailController.text),
               Pressable(
                 onTap: () => setState(() => _rememberEmail = !_rememberEmail),
                 borderRadius: BorderRadius.circular(10),
@@ -6018,6 +6057,30 @@ class _BusinessSettingsPageState extends State<BusinessSettingsPage> {
                         const AppLockSetting(),
                       ],
                     ),
+                  ),
+                  const SizedBox(height: 24),
+                  const SectionLabel('Login'),
+                  RowGroup(
+                    children: [
+                      ListRowTile(
+                        leading: const IconTile(
+                          Icons.lock_reset_outlined,
+                          size: 40,
+                        ),
+                        title: 'Change password',
+                        subtitle: 'The password you log in with',
+                        showChevron: true,
+                        onTap: () => _openPage(
+                          context,
+                          Builder(
+                            builder: (page) => ForcedPasswordPage(
+                              reason: NewPasswordReason.change,
+                              onDone: () async => Navigator.of(page).pop(),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 24),
                   const SectionLabel('Tally'),

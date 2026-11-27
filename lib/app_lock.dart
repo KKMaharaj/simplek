@@ -97,12 +97,17 @@ class AppLockGate extends StatefulWidget {
     super.key,
     required this.child,
     required this.onUsePassword,
+    this.onForgotPassword,
   });
 
   final Widget child;
 
   /// Called when the user prefers to sign in again with their password.
   final Future<void> Function() onUsePassword;
+
+  /// "Forgot password?" under it (CR 19 Nov, change 2): logs out and opens
+  /// the reset page.
+  final Future<void> Function()? onForgotPassword;
 
   @override
   State<AppLockGate> createState() => _AppLockGateState();
@@ -226,6 +231,11 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
                   onPressed: widget.onUsePassword,
                   child: const Text('Log in with password instead'),
                 ),
+                if (widget.onForgotPassword != null)
+                  TextButton(
+                    onPressed: widget.onForgotPassword,
+                    child: const Text('Forgot password?'),
+                  ),
               ],
             ),
           ),

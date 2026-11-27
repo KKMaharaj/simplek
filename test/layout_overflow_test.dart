@@ -84,6 +84,15 @@ final _screens = <String, Widget Function()>{
   'sign-up': () => const SignupPage(),
   'paused account': () => const SuspendedPage(),
   'new password': () => ForcedPasswordPage(onDone: () async {}),
+  'new password after reset': () => ForcedPasswordPage(
+    reason: NewPasswordReason.recovery,
+    onDone: () async {},
+  ),
+  'change password': () =>
+      ForcedPasswordPage(reason: NewPasswordReason.change, onDone: () async {}),
+  'forgot password': () => const ResetPasswordPage(
+    initialEmail: 'valyou.products.shivamogga@example.in',
+  ),
 };
 
 /// The app's real fonts, so text is measured as it is in the app (the
@@ -91,7 +100,9 @@ final _screens = <String, Widget Function()>{
 Future<void> _loadFonts() async {
   Future<void> load(String family, String path) async {
     final loader = FontLoader(family)
-      ..addFont(Future.value(ByteData.sublistView(File(path).readAsBytesSync())));
+      ..addFont(
+        Future.value(ByteData.sublistView(File(path).readAsBytesSync())),
+      );
     await loader.load();
   }
 

@@ -146,7 +146,8 @@ void main() {
       expect(find.text('Set a new password'), findsOneWidget);
       await tester.enterText(find.byType(TextFormField).first, 'short');
       await tester.tap(find.text('Save and continue'));
-      await tester.pump();
+      // The rules are shown before typing; the error replaces them.
+      await tester.pumpAndSettle();
       expect(
         find.text('At least 8 characters, with a letter and a number'),
         findsOneWidget,

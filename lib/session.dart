@@ -35,6 +35,7 @@ Future<void> clearLocalAccountData() async {
   await ListPrefs.load(null);
   await AppLock.load(null);
   await PendingSignup.clear();
+  PasswordReset.recovering.value = false;
   DesignSettings.destination.value = 0;
 }
 

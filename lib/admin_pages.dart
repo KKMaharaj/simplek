@@ -3475,10 +3475,28 @@ class SuspendedPage extends StatelessWidget {
   );
 }
 
-/// "Set a new password", forced after an admin reset (S3).
+/// Why "Set a new password" is shown.
+enum NewPasswordReason {
+  /// After an admin reset (S3): a temporary password was used.
+  forced,
+
+  /// After a "Forgot password?" code or link (CR 19 Nov, change 2).
+  recovery,
+
+  /// Settings → Change password.
+  change,
+}
+
+/// "Set a new password": forced after an admin reset (S3), after a reset
+/// code, and from Settings → Change password.
 class ForcedPasswordPage extends StatefulWidget {
-  const ForcedPasswordPage({super.key, required this.onDone});
+  const ForcedPasswordPage({
+    super.key,
+    required this.onDone,
+    this.reason = NewPasswordReason.forced,
+  });
   final Future<void> Function() onDone;
+  final NewPasswordReason reason;
 
   @override
   State<ForcedPasswordPage> createState() => _ForcedPasswordPageState();
@@ -3489,6 +3507,24 @@ class _ForcedPasswordPageState extends State<ForcedPasswordPage> {
   final _password = TextEditingController();
   final _confirm = TextEditingController();
   bool _saving = false;
+  bool _show = false;
+
+  String get _email {
+    try {
+      return Supabase.instance.client.auth.currentUser?.email ?? 'your account';
+    } catch (_) {
+      return 'your account'; // Supabase not started (widget tests).
+    }
+  }
+
+  String get _intro => switch (widget.reason) {
+    NewPasswordReason.forced =>
+      'You logged in with a temporary password. Choose your own to carry on.',
+    NewPasswordReason.recovery =>
+      'Choose a new password for $_email. Your old password will stop '
+          'working.',
+    NewPasswordReason.change => 'Choose a new password for $_email.',
+  };
 
   @override
   void dispose() {
@@ -3499,6 +3535,7 @@ class _ForcedPasswordPageState extends State<ForcedPasswordPage> {
 
   Future<void> _save() async {
     if (!_form.currentState!.validate()) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
     setState(() => _saving = true);
     try {
       await Supabase.instance.client.auth.updateUser(
@@ -3507,21 +3544,34 @@ class _ForcedPasswordPageState extends State<ForcedPasswordPage> {
           data: {'must_change_password': false, 'password_set': true},
         ),
       );
+      // Lets the browser or phone offer to save the new password.
+      TextInput.finishAutofillContext();
       await widget.onDone();
+      if (widget.reason != NewPasswordReason.forced) {
+        messenger?.showSnackBar(
+          const SnackBar(content: Text('Password changed')),
+        );
+      }
     } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(error is AuthException ? error.message : '$error'),
-        ),
-      );
+      messenger?.showSnackBar(SnackBar(content: Text(newPasswordError(error))));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
+  Widget _eye() => IconButton(
+    tooltip: _show ? 'Hide password' : 'Show password',
+    onPressed: () => setState(() => _show = !_show),
+    icon: Icon(
+      _show ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+    ),
+  );
+
   @override
   Widget build(BuildContext context) => Scaffold(
+    appBar: widget.reason == NewPasswordReason.change
+        ? AppBar(title: const Text('Change password'))
+        : null,
     body: Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
@@ -3529,60 +3579,70 @@ class _ForcedPasswordPageState extends State<ForcedPasswordPage> {
           constraints: const BoxConstraints(maxWidth: 420),
           child: Form(
             key: _form,
-            child: SectionCard(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    'Set a new password',
-                    style: Theme.of(context).textTheme.headlineSmall,
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'You logged in with a temporary password. Choose your own '
-                    'to carry on.',
-                  ),
-                  const SizedBox(height: 14),
-                  LabeledField(
-                    label: 'New password',
-                    child: TextFormField(
-                      controller: _password,
-                      obscureText: true,
-                      autofillHints: const [AutofillHints.newPassword],
-                      validator: (value) {
-                        final text = value ?? '';
-                        if (text.length < 8 ||
-                            !RegExp(r'[A-Za-z]').hasMatch(text) ||
-                            !RegExp(r'\d').hasMatch(text)) {
-                          return 'At least 8 characters, with a letter and a number';
-                        }
-                        return null;
-                      },
+            child: AutofillGroup(
+              child: SectionCard(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'Set a new password',
+                      style: Theme.of(context).textTheme.headlineSmall,
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  LabeledField(
-                    label: 'Confirm password',
-                    child: TextFormField(
-                      controller: _confirm,
-                      obscureText: true,
-                      validator: (value) => value == _password.text
-                          ? null
-                          : 'Passwords do not match',
+                    const SizedBox(height: 8),
+                    Text(_intro),
+                    const SizedBox(height: 14),
+                    LabeledField(
+                      label: 'New password',
+                      child: TextFormField(
+                        controller: _password,
+                        obscureText: !_show,
+                        autofillHints: const [AutofillHints.newPassword],
+                        decoration: InputDecoration(
+                          helperText: kPasswordRules,
+                          suffixIcon: _eye(),
+                        ),
+                        validator: passwordRuleError,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  FilledButton(
-                    onPressed: _saving ? null : _save,
-                    child: Text(_saving ? 'Saving…' : 'Save and continue'),
-                  ),
-                  TextButton(
-                    onPressed: () =>
-                        signOutEverywhereOnThisDevice(context, confirm: false),
-                    child: const Text('Log out'),
-                  ),
-                ],
+                    const SizedBox(height: 10),
+                    LabeledField(
+                      label: 'Confirm password',
+                      child: TextFormField(
+                        controller: _confirm,
+                        obscureText: !_show,
+                        autofillHints: const [AutofillHints.newPassword],
+                        decoration: InputDecoration(suffixIcon: _eye()),
+                        validator: (value) => value == _password.text
+                            ? null
+                            : 'Passwords do not match',
+                        onFieldSubmitted: (_) => _saving ? null : _save(),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    FilledButton(
+                      onPressed: _saving ? null : _save,
+                      child: Text(
+                        _saving
+                            ? 'Saving…'
+                            : widget.reason == NewPasswordReason.change
+                            ? 'Save password'
+                            : 'Save and continue',
+                      ),
+                    ),
+                    if (widget.reason != NewPasswordReason.change)
+                      TextButton(
+                        onPressed: () {
+                          PasswordReset.recovering.value = false;
+                          signOutEverywhereOnThisDevice(
+                            context,
+                            confirm: false,
+                          );
+                        },
+                        child: const Text('Log out'),
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
