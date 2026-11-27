@@ -44,6 +44,30 @@
   sends sign-up emails only to the project's team members, at most 2 an hour,
   so customers can't sign up. Gmail SMTP with an app password, or a free
   Brevo account, is enough to start.
+  *Done by the owner on 26 Nov 2026; checked read-only on 27 Nov: Gmail SMTP
+  (smtp.gmail.com:587) as "Simplek" <support.simplek@gmail.com>, 30 emails an
+  hour, one per address a minute.*
+- **Forgot password: the reset email must show the code (owner's step).**
+  Supabase → Authentication → Emails → Templates → **Reset password**. The
+  standard template has only a link; the app asks for the code. Replace the
+  message body with:
+
+  ```html
+  <h2>Reset your Simplek password</h2>
+  <p>Your code is:</p>
+  <p style="font-size:28px;font-weight:bold;letter-spacing:6px">{{ .Token }}</p>
+  <p>Type it in Simplek to choose a new password. If you didn't ask for this,
+  ignore this email; your password stays the same.</p>
+  ```
+
+  Subject: `Your Simplek password reset code`. Until this is done the email
+  has only the link; the link still works on the device that asked for it
+  (it opens "Set a new password"), but not on another device.
+- **Code length and expiry (owner's choice).** Live: 8-digit codes valid
+  for 1 hour. BUILD-STANDARDS §3 asks for 6 digits valid 5–10 minutes:
+  Authentication → Sign In / Providers → Email → "Email OTP Length" 6 and
+  "Email OTP Expiration" 600 seconds. The app accepts 6 to 10 digits, so
+  either setting works. It also applies to sign-up links and codes.
 - **Redirect URLs (login fixes L5): owner to check.** The app sends sign-up
   links back to `simplek://login-callback/` (Android; the app's manifest
   handles it) and to the web app's own address,

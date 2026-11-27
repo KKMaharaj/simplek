@@ -169,3 +169,19 @@ In version 1.5.0.
 |---|---|---|---|
 | F1 | Footer: "This is a computer-generated invoice, made with **Simplek**." ("quotation" on quotations); only "Simplek" links to https://simplek.in (`kSimplekWebsite` in `document_text.dart`); 8 pt muted, "Simplek" bold ink, no underline, one line; tagline above and "Page x of y" below kept | Done (tests: one link on GST, non-GST and quotation PDFs, one per page on a multi-page invoice; checked on screen) | `lib/document_pdf.dart` footer; `test/invoice_footer_test.dart` |
 | F2 | Tapping "Simplek" opens the website in a phone and a computer PDF viewer | **Needs hand test** | Any invoice PDF |
+
+## Change request of 19 Nov 2026, change 2: "Forgot password?" (`docs/CHANGE_REQUEST_2026-11-19.md`)
+
+Postponed until Simplek could send its own email; built on 27 Nov 2026 after the owner set up Gmail SMTP. In version 1.5.1 (build 20261129). No database change.
+
+| # | Change | Status | Where to check |
+|---|---|---|---|
+| P1 | "Forgot password?" under the password box on the login screen (phone and web), and on the fingerprint lock screen (logs out, then opens the reset page with the account's email) | Done (widget and source tests) | Login screen; lock screen |
+| P2 | Screen A "Reset your password": email filled in from the login screen, checked, **Send code**; always "If an account exists for this email, we've sent a code" | Done (widget test); **Needs hand test** (real email) | Login → Forgot password? |
+| P3 | Screen B "Enter the code": digits only, paste, one-time-code autofill; 6–10 digits (live codes are 8); **Resend code** after a 60 s countdown; **Change email**; 5 wrong codes, then a new code is needed | Done in code; **Needs hand test** (needs a real code) | The email from P2 |
+| P4 | Screen C "Set a new password": rules shown first (8+ characters, a letter and a number), eye button, Confirm; then "Password changed" and Home, logged in; the old password stops working. A reset link lands on the same screen | Done (widget tests); **Needs hand test** | After P3 |
+| P5 | Plain messages: wrong or expired code (Supabase can't tell them apart), "Please wait a minute and try again", no internet; never the raw error | Done (unit tests) | `test/password_reset_test.dart` |
+| P6 | Settings → Login → **Change password** (same screen C) | Done (widget test); **Needs hand test** | Settings |
+| P7 | Owner's step: the "Reset password" email template must contain `{{ .Token }}` (text in `NOTES.md`) | **Not started** (owner, Supabase dashboard) | Supabase → Authentication → Emails → Templates |
+
+Tests: `flutter analyze` clean; `flutter test` (see the commit); `test/password_reset_test.dart`; the layout test now covers the three new screens at every width.
