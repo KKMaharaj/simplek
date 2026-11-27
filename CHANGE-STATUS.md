@@ -116,3 +116,47 @@ Hand tests on the phone (Android), from the change request:
 3. Start sign-up on the phone, then log in as another account → normal Home, no "Set your password".
 4. Quick unlock on: password login → no fingerprint; close and reopen the app → fingerprint once.
 5. On "Set your password" and "Set up your business", Cancel and Log out work.
+
+## Change request of 26 Nov 2026: super admin panel (`docs/CHANGE_REQUEST_2026-11-26_SUPER_ADMIN.md`)
+
+In version 1.5.0. Database migrations `20261127000005`–`20261127000007` and
+the edge functions `admin-reset-password` and `admin-integration-test` are
+committed and pass the rolled-back rehearsal on the live database, but are
+**not applied yet** (the owner runs `supabase db push` and the function
+deploy; see the final report). Until then the app hides everything that
+needs them.
+
+| # | Change | Status | Where to check |
+|---|---|---|---|
+| S0 | Web only at `#/admin`; "page not found" for everyone else; super admins in `super_admins`; two-step login (TOTP) required; ADMIN badge and sidebar | Done (SQL test: a non-admin or an admin without two-step can call no admin function and read no admin table); **Needs hand test** after the owner adds himself | `lib/admin_pages.dart`; `supabase/tests/20261127_super_admin_regressions.sql` |
+| S1 | Dashboard: businesses, sign-ups, invoices, usage, needs attention | Done; **Needs hand test** | Admin → Dashboard |
+| S2 | Businesses: search, filters, paging, detail, change plan, notes, suspend/reactivate, support view (read-only, logged, banner), start deletion, download business data | Done; **Needs hand test** | Admin → Businesses |
+| S3 | One email = one account ("This email already has an account"); Reset password gives a temporary password once and forces "Set a new password" at the next login | Done (SQL test, widget test for the forced page); **Needs hand test** | Admin → Users; `ForcedPasswordPage` |
+| S4 | Plans: Free 250 invoices (deleted ones count, drafts don't), usage on Settings and Home at 80%, limit dialog, enforcement only when the platform switch is on | Done (SQL test both ways); **Owner to confirm** "250 in total or per month" | Settings → Your plan; Admin → Plans |
+| S5 | Integrations: email (SMTP/Brevo), WhatsApp, Razorpay; secrets in Vault, shown masked; Test buttons | Done; **Owner's step**: create the accounts and enter the keys | Admin → Integrations |
+| S6 | Platform settings (sign-ups open, notice banner, support contact, enforce limits) and the audit log with filters | Done; **Needs hand test** | Admin → Settings, Audit log |
+| S7 | Privacy Notice line about authorised staff; support view logged | Done | `website/privacy.html` |
+
+Screenshots of the admin pages: not taken against live data (the migrations
+aren't applied yet). Take them after the `db push`.
+
+## Change request of 26 Nov 2026: Tally (`docs/CHANGE_REQUEST_2026-11-26_TALLY.md`)
+
+In version 1.5.0. Migration `20261127000008_tally_export.sql` and the edge
+function `tally-export` are committed and tested, **not applied or deployed
+yet** (same owner step as the super admin migrations). Until then "Export
+for Tally" says "Tally export is not available yet".
+
+| # | Change | Status | Where to check |
+|---|---|---|---|
+| T0 | The old one-line `_exportTallyXml` and "Export TallyPrime XML" removed | Done (test) | `test/tally_test.dart` |
+| T1 | The kit's exporter as the `tally-export` edge function; owner or accountant with view access; returns the XML and the check summary | Done (19 exporter tests) | `supabase/functions/tally-export/` |
+| T2 | Many items, GST rates, services, non-GST, partial payments, ledger-lines switch; the kit's XML structure kept exactly | Done (tests compare with the kit's samples) | `tally_test.ts`; `NOTES.md` (differences) |
+| T3 | `tally_exports`, `tally_settings`, export data, renames in `audit_log` | Done (SQL test, rolled-back rehearsal on the live database) | `supabase/tests/20261127_tally_regressions.sql` |
+| T4.1 | Reports → Export for Tally: dates, Sales/Receipts, check summary, matches Reports, voucher list with "already exported", red deleted-after-export warnings, Download for Tally | Done; **Needs hand test** after deploy | Reports → Tally |
+| T4.2 | Settings → Tally settings: company, per-rate names, units, ledger-lines switch, "Standard: …", Save and Reset top and bottom, rename log | Done; **Needs hand test** after deploy | Settings → Tally settings |
+| T4.3 | "How to import into TallyPrime" help panel | Done (widget test) | Both Tally screens |
+| T5 | Sample files from a test business | Done; **Owner to import one into TallyPrime** | `docs/tally-samples/` |
+
+Tests: `node --test supabase/functions/tally-export/tally_test.ts` (19 pass),
+`flutter test` (183 pass), the SQL rehearsal of all migrations and tests.
