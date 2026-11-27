@@ -160,3 +160,12 @@ for Tally" says "Tally export is not available yet".
 
 Tests: `node --test supabase/functions/tally-export/tally_test.ts` (19 pass),
 `flutter test` (183 pass), the SQL rehearsal of all migrations and tests.
+
+## Change request of 26 Nov 2026: "made with Simplek" in the PDF footer (`docs/CHANGE_REQUEST_2026-11-26_INVOICE_FOOTER.md`)
+
+In version 1.5.0.
+
+| # | Change | Status | Where to check |
+|---|---|---|---|
+| F1 | Footer: "This is a computer-generated invoice, made with **Simplek**." ("quotation" on quotations); only "Simplek" links to https://simplek.in (`kSimplekWebsite` in `document_text.dart`); 8 pt muted, "Simplek" bold ink, no underline, one line; tagline above and "Page x of y" below kept | Done (tests: one link on GST, non-GST and quotation PDFs, one per page on a multi-page invoice; checked on screen) | `lib/document_pdf.dart` footer; `test/invoice_footer_test.dart` |
+| F2 | Tapping "Simplek" opens the website in a phone and a computer PDF viewer | **Needs hand test** | Any invoice PDF |

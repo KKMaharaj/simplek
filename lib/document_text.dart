@@ -1,3 +1,7 @@
+/// Simplek's website, linked from the word "Simplek" in every PDF footer
+/// (change request 26 Nov 2026, invoice footer). Change it only here.
+const kSimplekWebsite = 'https://simplek.in';
+
 String? validateDocumentNumber(String? value) {
   final number = value?.trim() ?? '';
   if (number.isEmpty) return null;

@@ -119,6 +119,9 @@ Future<Uint8List> buildDocumentPdf(
   PdfDocumentData data,
   Map<String, String> profile, {
   PdfPageFormat format = PdfPageFormat.a4,
+
+  /// False only in tests, to read the PDF as text.
+  bool compress = true,
 }) async {
   final fonts = await _loadFonts();
   final palette = InvoicePalette.resolve(profile['invoiceTheme']);
@@ -141,6 +144,7 @@ Future<Uint8List> buildDocumentPdf(
     upiLogo: upiLogo,
   );
   final pdf = pw.Document(
+    compress: compress,
     title: '${layout.title} ${data.number}',
     author: profile['name'] ?? 'Simplek',
     creator: 'Simplek',
@@ -823,10 +827,29 @@ class _Layout {
               tagline,
               style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: ink),
             ),
-          pw.Text(
-            'This is a computer-generated '
-            '${data.isQuotation ? 'quotation' : 'invoice'}.',
-            style: const pw.TextStyle(fontSize: 8, color: muted),
+          // "…, made with Simplek.": only "Simplek" links to the website;
+          // the address itself is not printed (change request 26 Nov 2026).
+          pw.RichText(
+            maxLines: 1,
+            text: pw.TextSpan(
+              style: const pw.TextStyle(fontSize: 8, color: muted),
+              children: [
+                pw.TextSpan(
+                  text:
+                      'This is a computer-generated '
+                      '${data.isQuotation ? 'quotation' : 'invoice'}, made with ',
+                ),
+                pw.TextSpan(
+                  text: 'Simplek',
+                  style: pw.TextStyle(
+                    fontWeight: pw.FontWeight.bold,
+                    color: ink,
+                  ),
+                  annotation: pw.AnnotationUrl(kSimplekWebsite),
+                ),
+                const pw.TextSpan(text: '.'),
+              ],
+            ),
           ),
           if (context.pagesCount > 1)
             pw.Text(
